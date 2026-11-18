@@ -1,141 +1,137 @@
-// The story of SOLMAR HEAT: four chained missions with short dialogue, a
-// marker to reach, and a payout. Rico runs the garage, Mara runs the jobs,
-// and the player — Jax Rook, a driver fresh out of the Solmar docks — climbs
-// from stealing one car to the Marina Vault job.
+// Rico and Mara's arc: four chained story missions starring Jax Rook. Each
+// mission is a small state machine — reach the target, beat the clock, or lose
+// the heat — and finishing one starts the next. Failing one (clock, busted,
+// wasted) sends Jax back to its start; the story never ends, it waits.
+import { MISSIONS } from './config.js';
 
-import { PLACES, REWARDS } from './config.js';
-import { dist2D } from './config.js';
+// How close Jax must get to a target to count as there. Landmark targets are
+// buildings, and the collision circle stops a car 15–25 units from their
+// centre, so a building target needs a radius past its walls; open ground
+// (the plaza, the marina docks) counts at arm's length. Do NOT shrink these:
+// small radii are uncompletable because building collision stops a car
+// 15–25 units from a landmark building's centre.
+const RADIUS_OPEN = 10;
+const RADIUS_BUILDING = 40;
 
-export const MISSION_DEFS = [
-  {
-    id: 'm1',
-    title: 'First Wheels',
-    giver: 'Rico',
-    briefing: 'Rico: "Jax! The garage needs a ride. Steal the red coupe by the plaza and bring it home."',
-    steps: [
-      { text: 'Steal a car and drive it to the garage', target: PLACES.plaza, radius: 6, needsCar: true },
-      { text: 'Deliver the car to Rico\u2019s Garage', target: PLACES.garage, radius: 7, needsCar: true },
-    ],
-    reward: REWARDS.m1,
-    done: 'Rico: "Clean work. You drive like you mean it."',
-  },
-  {
-    id: 'm2',
-    title: 'Courier Run',
-    giver: 'Mara',
-    briefing: 'Mara: "A package for the market. Fast and quiet — the Solmar PD is jumpy today."',
-    steps: [
-      { text: 'Pick up the package at Mercado Verde', target: PLACES.market, radius: 6 },
-      { text: 'Deliver the package to the Marina', target: PLACES.marina, radius: 7 },
-    ],
-    reward: REWARDS.m2,
-    done: 'Mara: "Delivered. The client sends his thanks — and his cash."',
-  },
-  {
-    id: 'm3',
-    title: 'Heat on the Pier',
-    giver: 'Mara',
-    briefing: 'Mara: "The cops made the drop. Lose them, then meet me at the pier. No heroics."',
-    steps: [
-      { text: 'Lose the police (get wanted to 0)', target: null, radius: 0, loseHeat: true },
-      { text: 'Meet Mara at Sunset Pier', target: PLACES.pier, radius: 7 },
-    ],
-    reward: REWARDS.m3,
-    done: 'Mara: "You shook them. One more job and we are out of this town\u2019s shadow."',
-  },
-  {
-    id: 'm4',
-    title: 'The Solmar Job',
-    giver: 'Rico',
-    briefing: 'Rico: "The Marina Vault. One car, one window, one big score. Bring it to the lookout."',
-    steps: [
-      { text: 'Reach the Marina Vault', target: PLACES.vault, radius: 7 },
-      { text: 'Escape to the Cliff Lookout', target: PLACES.lookout, radius: 8 },
-    ],
-    reward: REWARDS.m4,
-    done: 'Rico: "That\u2019s the whole town in one haul. Solmar is yours now, Jax."',
-  },
-];
-
-export function createMissions() {
-  return {
-    index: 0, // which mission is active
-    step: 0,
-    active: false,
-    done: false, // whole story finished
-    message: '',
-    messageTimer: 0,
-    started: false,
-  };
+function say(state, text) {
+  state.messages.push({ text, t: state.time });
 }
 
-export function currentMission(missions) {
-  if (missions.index >= MISSION_DEFS.length) return null;
-  return MISSION_DEFS[missions.index];
+function setStep(state, step, label, target, timer) {
+  state.mission.step = step;
+  state.mission.label = label;
+  state.mission.target = target || null;
+  state.mission.timer = timer === undefined ? -1 : timer;
 }
 
-export function currentStep(missions) {
-  const m = currentMission(missions);
-  return m ? m.steps[missions.step] : null;
+/** The mission definition for the mission currently running (or null). */
+export function currentMissionDef(state) {
+  if (!state.mission || state.mission.index < 1) return null;
+  return MISSIONS[state.mission.index - 1];
 }
 
-export function startMissions(missions) {
-  missions.active = true;
-  missions.started = true;
-  const m = currentMission(missions);
-  if (m) showMessage(missions, m.briefing, 6);
-}
-
-export function showMessage(missions, text, seconds) {
-  missions.message = text;
-  missions.messageTimer = seconds || 4;
-}
-
-// Advance the mission state; returns 'complete' | 'storyDone' | null.
-// `events` carries what the world just did: { stoleCar, wanted }.
-export function stepMissions(missions, player, police, dt) {
-  if (!missions.active || missions.done) return null;
-  if (missions.messageTimer > 0) missions.messageTimer -= dt;
-  const mission = currentMission(missions);
-  if (!mission) return null;
-  const stepDef = mission.steps[missions.step];
-  if (!stepDef) return null;
-  let reached = false;
-  if (stepDef.loseHeat) {
-    reached = police.stars === 0;
-  } else if (stepDef.target) {
-    const d = dist2D(player.x, player.z, stepDef.target.x, stepDef.target.z);
-    reached = d < stepDef.radius && (!stepDef.needsCar || player.inCar);
+/** Begin mission `index` (1-based). */
+export function startMission(state, index) {
+  const def = MISSIONS[index - 1];
+  const L = state.city.landmarks;
+  state.mission = { index, step: 0, label: '', target: null, timer: -1, hold: 0 };
+  say(state, `${def.giver}: ${def.intro}`);
+  if (index === 1) {
+    setStep(state, 0, 'Steal any car', null);
+  } else if (index === 2) {
+    setStep(state, 0, "Pick up Mara's package at the marina", { x: L.marina.x, z: L.marina.z, label: 'Package' });
+  } else if (index === 3) {
+    state.heat = 60;
+    state.lastCrime = state.time;
+    setStep(state, 0, 'Lose the heat — get to zero stars', null, 150);
+    say(state, 'Three stars. Every cop in Solmar is on you.');
+  } else if (index === 4) {
+    setStep(state, 0, 'Reach the marina vault', { x: L.vault.x, z: L.vault.z, label: 'Vault' });
   }
-  if (!reached) return null;
-  missions.step += 1;
-  if (missions.step < mission.steps.length) {
-    showMessage(missions, 'Objective done — ' + mission.steps[missions.step].text, 4);
-    return 'step';
-  }
-  // Mission complete: payout and move to the next one.
-  showMessage(missions, mission.done, 6);
-  missions.index += 1;
-  missions.step = 0;
-  if (missions.index >= MISSION_DEFS.length) {
-    missions.done = true;
-    missions.active = false;
-    return 'storyDone';
-  }
-  const next = currentMission(missions);
-  window.setTimeout(() => showMessage(missions, next.briefing, 6), 1500);
-  return 'complete';
 }
 
-export function objectiveText(missions) {
-  if (missions.done) return 'Story complete — Solmar is yours. Free roam!';
-  const mission = currentMission(missions);
-  if (!mission || !missions.active) return 'Press M to start the story';
-  const stepDef = mission.steps[missions.step];
-  return mission.title + ': ' + stepDef.text;
+function completeMission(state) {
+  const def = MISSIONS[state.mission.index - 1];
+  state.player.cash += def.reward;
+  state.stats.missionsDone += 1;
+  say(state, `Mission complete: ${def.name} — +$${def.reward}.`);
+  const next = state.mission.index + 1;
+  if (next > MISSIONS.length) {
+    state.mission = { index: 0, step: 0, label: '', target: null, timer: -1, hold: 0 };
+    say(state, 'SOLMAR HEAT complete. The city is yours, Jax.');
+    state.stats.finished = true;
+    return;
+  }
+  startMission(state, next);
 }
 
-export function objectiveTarget(missions) {
-  const stepDef = currentStep(missions);
-  return stepDef && stepDef.target ? stepDef.target : null;
+function failMission(state, reason) {
+  const def = MISSIONS[state.mission.index - 1];
+  say(state, `Mission failed: ${reason}. ${def.giver} is giving you another shot.`);
+  startMission(state, state.mission.index);
+}
+
+function near(state, target, radius) {
+  const dx = state.player.x - target.x;
+  const dz = state.player.z - target.z;
+  return dx * dx + dz * dz < radius * radius;
+}
+
+/** One fixed step of the story. Call every frame while playing. */
+export function stepMissions(state, dt) {
+  const m = state.mission;
+  if (!m || m.index === 0) return;
+  const L = state.city.landmarks;
+  if (m.timer > 0) {
+    m.timer -= dt;
+    if (m.timer <= 0) {
+      failMission(state, 'Out of time');
+      return;
+    }
+  }
+  if (m.index === 1) {
+    if (m.step === 0) {
+      if (!state.player.onFoot) {
+        setStep(state, 1, "Bring it to Rico's garage", { x: L.garage.x, z: L.garage.z, label: 'Garage' });
+        say(state, "Rico: Nice wheels. Now bring her home.");
+      }
+    } else if (near(state, m.target, RADIUS_BUILDING) && !state.player.onFoot) {
+      completeMission(state);
+    }
+  } else if (m.index === 2) {
+    if (m.step === 0) {
+      if (near(state, m.target, 8)) {
+        state.heat = Math.min(100, state.heat + 20);
+        state.lastCrime = state.time;
+        setStep(state, 1, 'Deliver to Plaza del Sol — 90s', { x: L.plaza.x, z: L.plaza.z, label: 'Plaza' }, 90);
+        say(state, 'Package grabbed. The cops noticed. Run!');
+      }
+    } else if (near(state, m.target, RADIUS_OPEN)) {
+      completeMission(state);
+    }
+  } else if (m.index === 3) {
+    if (state.wanted === 0) completeMission(state);
+  } else if (m.index === 4) {
+    if (m.step === 0) {
+      if (near(state, m.target, RADIUS_BUILDING)) {
+        state.heat = 80;
+        state.lastCrime = state.time;
+        setStep(state, 1, 'Crack the vault — hold position', { x: L.vault.x, z: L.vault.z, label: 'Vault' });
+        m.hold = 5;
+        say(state, 'Four stars. Crack it fast and vanish.');
+      }
+    } else if (m.step === 1) {
+      if (near(state, m.target, RADIUS_BUILDING)) {
+        m.hold -= dt;
+        if (m.hold <= 0) {
+          setStep(state, 2, 'Escape to the safehouse', { x: L.safehouse.x, z: L.safehouse.z, label: 'Safehouse' });
+          say(state, 'The take is yours. Lose them and get home.');
+        }
+      } else {
+        m.hold = 5;
+      }
+    } else if (near(state, m.target, RADIUS_BUILDING)) {
+      completeMission(state);
+    }
+  }
 }

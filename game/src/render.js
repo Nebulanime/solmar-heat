@@ -1,455 +1,650 @@
-// Drawing only: a small hand-rolled 3D renderer on a 2D canvas. Every box in
-// the city (buildings, cars, people, the pier) is projected with a perspective
-// camera, its faces shaded by the sun and painted far-to-near, with windows
-// drawn on the near walls. No library, no images: the whole look is code.
-
-import { CITY_EDGE, PALETTE, ROAD_LINES, ROAD_WIDTH } from './config.js';
-import { angleLerp, clamp, lerp } from './config.js';
+// Drawing only: the city in 3D, the HUD, the minimap and the menus. A chase
+// camera follows Jax; every box in the world is projected with a perspective
+// basis, collected as polygons, sorted far-to-near and painted flat-shaded.
+// The HUD and the minimap are screen space. Nothing here touches the rules.
+import { CITY, FONT, FONT_DISPLAY, PALETTE } from './config.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_OVER = 'over';
 
-const SUN = { x: 0.45, y: 0.75, z: 0.35 };
+const FOV = 1.05; // vertical field of view, radians
+const CAM_DIST = 27;
+const CAM_HEIGHT = 16;
+const CAM_PITCH = 0.42;
+const VIEW_DIST = 340;
 
 function shade(hex, factor) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = clamp(Math.round(((n >> 16) & 255) * factor), 0, 255);
-  const g = clamp(Math.round(((n >> 8) & 255) * factor), 0, 255);
-  const b = clamp(Math.round((n & 255) * factor), 0, 255);
+  const n = Number.parseInt(hex.slice(1), 16);
+  const r = Math.min(255, Math.round(((n >> 16) & 255) * factor));
+  const g = Math.min(255, Math.round(((n >> 8) & 255) * factor));
+  const b = Math.min(255, Math.round((n & 255) * factor));
   return `rgb(${r},${g},${b})`;
 }
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
-  let W = 0;
-  let H = 0;
-  let focal = 600;
-  // Smoothed camera that chases the player instead of snapping to them.
-  const cam = { x: 0, y: 6, z: -14, yaw: 0 };
-  let orbit = 0;
+  const view = { w: 1280, h: 720, dpr: 1 };
+  const fonts = new Map();
+  // The camera basis of the last drawn frame, for screenToGround.
+  let cam = null;
 
   function resize() {
     const ratio = window.devicePixelRatio || 1;
-    W = Math.round(window.innerWidth * ratio);
-    H = Math.round(window.innerHeight * ratio);
-    canvas.width = W;
-    canvas.height = H;
-    focal = H * 0.85;
+    view.dpr = ratio;
+    view.w = window.innerWidth;
+    view.h = window.innerHeight;
+    canvas.width = Math.round(view.w * ratio);
+    canvas.height = Math.round(view.h * ratio);
+    canvas.style.width = `${view.w}px`;
+    canvas.style.height = `${view.h}px`;
   }
-  resize();
-  window.addEventListener('resize', resize);
 
-  // Project a world point into screen space. Null when behind the camera.
+  function font(size, display) {
+    const key = `${size}|${display ? 'd' : ''}`;
+    if (!fonts.has(key)) fonts.set(key, `${display ? '700 ' : ''}${size}px ${display ? FONT_DISPLAY : FONT}`);
+    return fonts.get(key);
+  }
+
+  function text(value, x, y, size, color, align = 'left', display = false) {
+    ctx.font = font(size, display);
+    ctx.fillStyle = color;
+    ctx.textAlign = align;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(value, x, y);
+  }
+
+  function computeCamera(state) {
+    const p = state.player;
+    const yaw = state.camera.yaw;
+    const fwdX = Math.sin(yaw);
+    const fwdZ = Math.cos(yaw);
+    const tx = p.x + fwdX * 8;
+    const tz = p.z + fwdZ * 8;
+    const pos = { x: tx - fwdX * CAM_DIST, y: CAM_HEIGHT, z: tz - fwdZ * CAM_DIST };
+    const cp = Math.cos(CAM_PITCH);
+    const sp = Math.sin(CAM_PITCH);
+    const fwd = { x: fwdX * cp, y: -sp, z: fwdZ * cp };
+    const right = { x: -fwdZ, y: 0, z: fwdX };
+    const up = { x: fwdX * sp, y: cp, z: fwdZ * sp };
+    const focal = (view.h / 2) / Math.tan(FOV / 2);
+    cam = { pos, fwd, right, up, focal };
+    return cam;
+  }
+
   function project(x, y, z) {
-    const dx = x - cam.x;
-    const dy = y - cam.y;
-    const dz = z - cam.z;
-    const cos = Math.cos(cam.yaw);
-    const sin = Math.sin(cam.yaw);
-    const cx = dx * cos - dz * sin;
-    let cy = dy;
-    let cz = dx * sin + dz * cos;
-    // Pitch the camera down a little so the street fills the frame.
-    const pitch = 0.18;
-    const cp = Math.cos(pitch);
-    const sp = Math.sin(pitch);
-    const y2 = cy * cp - cz * sp;
-    const z2 = cy * sp + cz * cp;
-    if (z2 < 0.4) return null;
+    const dx = x - cam.pos.x;
+    const dy = y - cam.pos.y;
+    const dz = z - cam.pos.z;
+    const cz = dx * cam.fwd.x + dy * cam.fwd.y + dz * cam.fwd.z;
+    if (cz < 1) return null;
+    const cx = dx * cam.right.x + dy * cam.right.y + dz * cam.right.z;
+    const cy = dx * cam.up.x + dy * cam.up.y + dz * cam.up.z;
     return {
-      x: W / 2 + (cx / z2) * focal,
-      y: H * 0.52 - (y2 / z2) * focal,
-      depth: z2,
+      x: view.w / 2 + (cam.focal * cx) / cz,
+      y: view.h / 2 - (cam.focal * cy) / cz,
+      d: cz,
     };
   }
 
-  function quad(points, fill) {
-    ctx.fillStyle = fill;
-    ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
-    for (let i = 1; i < points.length; i += 1) ctx.lineTo(points[i].x, points[i].y);
-    ctx.closePath();
-    ctx.fill();
+  /** A screen point back onto the ground plane (y = 0), or null when it misses. */
+  function screenToGround(sx, sy) {
+    if (!cam) return null;
+    const nx = (sx - view.w / 2) / cam.focal;
+    const ny = (view.h / 2 - sy) / cam.focal;
+    const dx = cam.right.x * nx + cam.up.x * ny + cam.fwd.x;
+    const dy = cam.right.y * nx + cam.up.y * ny + cam.fwd.y;
+    const dz = cam.right.z * nx + cam.up.z * ny + cam.fwd.z;
+    if (dy >= -0.001) return null;
+    const t = -cam.pos.y / dy;
+    return { x: cam.pos.x + dx * t, z: cam.pos.z + dz * t };
   }
 
-  // A flat quad on the ground plane (y = 0.05), drawn before the boxes.
-  function groundQuad(x0, z0, x1, z1, fill) {
-    const p = [project(x0, 0.05, z0), project(x1, 0.05, z0), project(x1, 0.05, z1), project(x0, 0.05, z1)];
-    if (p.some((q) => q === null)) return;
-    quad(p, fill);
+  function drawSky(state) {
+    const g = ctx.createLinearGradient(0, 0, 0, view.h * 0.62);
+    g.addColorStop(0, PALETTE.skyTop);
+    g.addColorStop(0.7, PALETTE.skyMid);
+    g.addColorStop(1, PALETTE.horizon);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, view.w, view.h * 0.62 + 2);
+    // The sun hangs in the south-west, fixed in the world.
+    const sun = project(state.player.x - 500, 260, state.player.z + 500);
+    if (sun) {
+      ctx.fillStyle = PALETTE.sun;
+      ctx.beginPath();
+      ctx.arc(sun.x, sun.y, 34, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
-  // Collect one box's faces into `faces`. heading rotates it around Y.
-  function addBox(faces, cx, cy, cz, w, h, d, heading, topColor, sideColor, windows) {
-    const hw = w / 2;
-    const hh = h / 2;
-    const hd = d / 2;
-    const cos = Math.cos(heading);
-    const sin = Math.sin(heading);
-    const local = [
-      [-hw, -hh, -hd], [hw, -hh, -hd], [hw, -hh, hd], [-hw, -hh, hd],
-      [-hw, hh, -hd], [hw, hh, -hd], [hw, hh, hd], [-hw, hh, hd],
-    ];
-    const world = local.map(([lx, ly, lz]) => ({
-      x: cx + lx * cos + lz * sin,
-      y: cy + ly,
-      z: cz - lx * sin + lz * cos,
-    }));
-    const faceDefs = [
-      { idx: [4, 5, 6, 7], normal: [0, 1, 0], color: topColor, kind: 'top' },
-      { idx: [3, 2, 6, 7], normal: [0, 0, 1], color: sideColor, kind: 'wall' },
-      { idx: [1, 0, 4, 5], normal: [0, 0, -1], color: sideColor, kind: 'wall' },
-      { idx: [2, 1, 5, 6], normal: [1, 0, 0], color: sideColor, kind: 'wall' },
-      { idx: [0, 3, 7, 4], normal: [-1, 0, 0], color: sideColor, kind: 'wall' },
-    ];
-    for (const def of faceDefs) {
-      const pts = def.idx.map((i) => world[i]);
-      // World-space normal for sun shading.
-      const [nx, ny, nz] = def.normal;
-      const wnx = nx * cos + nz * sin;
-      const wnz = -nx * sin + nz * cos;
-      const sunDot = Math.max(0, wnx * SUN.x + ny * SUN.y + wnz * SUN.z);
-      const bright = 0.62 + 0.38 * sunDot;
-      let depth = 0;
-      let visible = false;
-      for (const p of pts) {
-        const pr = project(p.x, p.y, p.z);
-        if (pr) {
-          depth += pr.depth;
-          visible = true;
+  // A polygon is [x, y, z] corners plus a fill; depth is its centre's distance.
+  function poly(list, pts, color) {
+    let cx = 0;
+    let cy = 0;
+    let cz = 0;
+    for (const p of pts) {
+      cx += p[0];
+      cy += p[1];
+      cz += p[2];
+    }
+    const n = pts.length;
+    const dx = cx / n - cam.pos.x;
+    const dy = cy / n - cam.pos.y;
+    const dz = cz / n - cam.pos.z;
+    const d = dx * dx + dy * dy + dz * dz;
+    if (d > VIEW_DIST * VIEW_DIST) return;
+    list.push({ pts, color, d });
+  }
+
+  function face(list, quad, color, shadeFactor) {
+    poly(list, quad, shadeFactor === undefined ? color : shade(color, shadeFactor));
+  }
+
+  /** The visible faces of an axis-aligned box. */
+  function box(list, x, z, w, d, h, topColor, sideColor, windows) {
+    const x0 = x - w / 2;
+    const x1 = x + w / 2;
+    const z0 = z - d / 2;
+    const z1 = z + d / 2;
+    const cx = cam.pos.x;
+    const cz = cam.pos.z;
+    // Roof.
+    face(list, [[x0, h, z0], [x1, h, z0], [x1, h, z1], [x0, h, z1]], topColor, 1.05);
+    // The two sides facing the camera.
+    if (cz < z0) face(list, [[x0, 0, z0], [x1, 0, z0], [x1, h, z0], [x0, h, z0]], sideColor, 0.82);
+    if (cz > z1) face(list, [[x1, 0, z1], [x0, 0, z1], [x0, h, z1], [x1, h, z1]], sideColor, 0.82);
+    if (cx < x0) face(list, [[x0, 0, z1], [x0, 0, z0], [x0, h, z0], [x0, h, z1]], sideColor, 0.68);
+    if (cx > x1) face(list, [[x1, 0, z0], [x1, 0, z1], [x1, h, z1], [x1, h, z0]], sideColor, 0.68);
+    if (windows) drawWindows(list, x, z, w, d, h);
+  }
+
+  function drawWindows(list, x, z, w, d, h) {
+    // Lit windows on the faces the camera can see, as small inset quads.
+    const rows = Math.max(1, Math.floor(h / 7));
+    const cols = Math.max(1, Math.floor(Math.max(w, d) / 9));
+    const x0 = x - w / 2;
+    const x1 = x + w / 2;
+    const z0 = z - d / 2;
+    const z1 = z + d / 2;
+    const win = '#ffe9a8';
+    for (let r = 0; r < rows; r += 1) {
+      const y0 = 3 + r * 7;
+      const y1 = y0 + 3.5;
+      for (let c = 0; c < cols; c += 1) {
+        if ((r * 7 + c * 3) % 5 === 0) continue; // some windows stay dark
+        if (cam.pos.z < z0) {
+          const wx0 = x0 + 4 + c * ((w - 8) / cols);
+          const wx1 = wx0 + 3.5;
+          poly(list, [[wx0, y0, z0 - 0.15], [wx1, y0, z0 - 0.15], [wx1, y1, z0 - 0.15], [wx0, y1, z0 - 0.15]], win);
+        }
+        if (cam.pos.z > z1) {
+          const wx0 = x0 + 4 + c * ((w - 8) / cols);
+          const wx1 = wx0 + 3.5;
+          poly(list, [[wx1, y0, z1 + 0.15], [wx0, y0, z1 + 0.15], [wx0, y1, z1 + 0.15], [wx1, y1, z1 + 0.15]], win);
+        }
+        if (cam.pos.x < x0) {
+          const wz0 = z0 + 4 + c * ((d - 8) / cols);
+          const wz1 = wz0 + 3.5;
+          poly(list, [[x0 - 0.15, y0, wz1], [x0 - 0.15, y0, wz0], [x0 - 0.15, y1, wz0], [x0 - 0.15, y1, wz1]], win);
+        }
+        if (cam.pos.x > x1) {
+          const wz0 = z0 + 4 + c * ((d - 8) / cols);
+          const wz1 = wz0 + 3.5;
+          poly(list, [[x1 + 0.15, y0, wz0], [x1 + 0.15, y0, wz1], [x1 + 0.15, y1, wz1], [x1 + 0.15, y1, wz0]], win);
         }
       }
-      if (!visible) continue;
-      faces.push({ pts, fill: shade(def.color, bright), depth: depth / 4, windows: def.kind === 'wall' && windows ? { w, h } : null });
     }
   }
 
-  function drawFaceWithWindows(face) {
-    const p = face.pts.map((q) => project(q.x, q.y, q.z));
-    if (p.some((q) => q === null)) return;
-    quad(p, face.fill);
-    if (!face.windows) return;
-    const { w, h } = face.windows;
-    const cols = clamp(Math.floor(w / 3.2), 1, 6);
-    const rows = clamp(Math.floor(h / 3.6), 1, 7);
-    if (cols * rows < 2) return;
-    const a = face.pts[0];
-    const b = face.pts[1];
-    const c = face.pts[2];
-    const d = face.pts[3];
-    // Bilinear interpolation across the face for each window pane.
-    for (let r = 0; r < rows; r += 1) {
-      for (let col = 0; col < cols; col += 1) {
-        const u0 = (col + 0.22) / cols;
-        const u1 = (col + 0.78) / cols;
-        const v0 = (r + 0.22) / rows;
-        const v1 = (r + 0.78) / rows;
-        const corner = (u, v) => {
-          const top = { x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), z: lerp(a.z, b.z, u) };
-          const bot = { x: lerp(d.x, c.x, u), y: lerp(d.y, c.y, u), z: lerp(d.z, c.z, u) };
-          return { x: lerp(top.x, bot.x, v), y: lerp(top.y, bot.y, v), z: lerp(top.z, bot.z, v) };
-        };
-        const wp = [corner(u0, v0), corner(u1, v0), corner(u1, v1), corner(u0, v1)].map((q) => project(q.x, q.y, q.z));
-        if (wp.some((q) => q === null)) continue;
-        quad(wp, 'rgba(40,70,95,0.85)');
+  function drawGround(state, list) {
+    const H = CITY.half;
+    const s = CITY.streets;
+    // The dirt the city sits on.
+    poly(list, [[-H - 60, 0, -H - 60], [H + 60, 0, -H - 60], [H + 60, 0, H + 120], [-H - 60, 0, H + 120]], PALETTE.blockTop);
+    // Beach and sea to the south.
+    poly(list, [[-H - 60, 0.1, CITY.seaZ - 22], [H + 60, 0.1, CITY.seaZ - 22], [H + 60, 0.1, CITY.seaZ], [-H - 60, 0.1, CITY.seaZ]], PALETTE.sand);
+    poly(list, [[-H - 60, 0.05, CITY.seaZ], [H + 60, 0.05, CITY.seaZ], [H + 60, 0.05, CITY.seaZ + 500], [-H - 60, 0.05, CITY.seaZ + 500]], PALETTE.sea);
+    // Sidewalks, then the asphalt on top of them.
+    for (const street of s) {
+      const w2 = CITY.street / 2 + 8;
+      poly(list, [[-H, 0.12, street - w2], [H, 0.12, street - w2], [H, 0.12, street + w2], [-H, 0.12, street + w2]], PALETTE.sidewalk);
+      poly(list, [[street - w2, 0.12, -H], [street + w2, 0.12, -H], [street + w2, 0.12, H], [street - w2, 0.12, H]], PALETTE.sidewalk);
+      const a2 = CITY.street / 2;
+      poly(list, [[-H, 0.15, street - a2], [H, 0.15, street - a2], [H, 0.15, street + a2], [-H, 0.15, street + a2]], PALETTE.asphalt);
+      poly(list, [[street - a2, 0.15, -H], [street + a2, 0.15, -H], [street + a2, 0.15, H], [street - a2, 0.15, H]], PALETTE.asphalt);
+    }
+    // The plaza's paving, and the parks' grass.
+    poly(list, [[-60, 0.18, -60], [60, 0.18, -60], [60, 0.18, 60], [-60, 0.18, 60]], PALETTE.plaza);
+    // Dashed centre lines down every street, so the roads read as roads.
+    for (const street of s) {
+      for (let v = -H + 8; v < H - 8; v += 16) {
+        poly(list, [[v, 0.22, street - 1], [v + 6, 0.22, street - 1], [v + 6, 0.22, street + 1], [v, 0.22, street + 1]], PALETTE.asphaltLine);
+        poly(list, [[street - 1, 0.22, v], [street + 1, 0.22, v], [street + 1, 0.22, v + 6], [street - 1, 0.22, v + 6]], PALETTE.asphaltLine);
+      }
+    }
+    // Zebra crossings at every intersection, so the grid reads at a glance.
+    const cross = '#e8e8e8';
+    for (const sx of s) {
+      for (const sz of s) {
+        for (let k = -3; k <= 3; k += 1) {
+          const off = k * 4;
+          poly(list, [[sx + off - 1.2, 0.2, sz - 14], [sx + off + 1.2, 0.2, sz - 14], [sx + off + 1.2, 0.2, sz - 8], [sx + off - 1.2, 0.2, sz - 8]], cross);
+          poly(list, [[sx - 14, 0.2, sz + off - 1.2], [sx - 8, 0.2, sz + off - 1.2], [sx - 8, 0.2, sz + off + 1.2], [sx - 14, 0.2, sz + off + 1.2]], cross);
+        }
       }
     }
   }
 
-  function drawSky(time) {
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, PALETTE.skyTop);
-    grad.addColorStop(0.55, PALETTE.skyMid);
-    grad.addColorStop(0.8, PALETTE.skyLow);
-    grad.addColorStop(1, '#f7d9a0');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
-    // Sun and slow clouds, screen-space.
-    const sx = W * 0.78;
-    const sy = H * 0.16;
-    ctx.fillStyle = PALETTE.sun;
-    ctx.beginPath();
-    ctx.arc(sx, sy, H * 0.05, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    for (let i = 0; i < 4; i += 1) {
-      const cxp = ((time * 6 + i * 340) % (W + 400)) - 200;
-      const cyp = H * (0.10 + i * 0.05);
-      ctx.beginPath();
-      ctx.ellipse(cxp, cyp, 90, 18, 0, 0, Math.PI * 2);
-      ctx.fill();
+  function drawBuildings(state, list) {
+    for (const b of state.city.buildings) {
+      const dx = b.x - state.player.x;
+      const dz = b.z - state.player.z;
+      if (dx * dx + dz * dz > VIEW_DIST * VIEW_DIST) continue;
+      const near = dx * dx + dz * dz < 150 * 150;
+      box(list, b.x, b.z, b.w, b.d, b.h,
+        state.city.roofColors[b.roof], state.city.buildingColors[b.color], near);
     }
   }
 
-  function drawGround(world) {
-    // Sea to the east, sand, then the city ground.
-    groundQuad(CITY_EDGE, -420, 460, 420, PALETTE.sea);
-    groundQuad(178, -420, CITY_EDGE, 420, PALETTE.sand);
-    groundQuad(-420, -420, 178, 420, '#a8a294');
-    // Block interiors in alternating tones, so the city reads as blocks, not desert.
-    const lines = ROAD_LINES;
-    for (let ix = 0; ix < lines.length - 1; ix += 1) {
-      for (let iz = 0; iz < lines.length - 1; iz += 1) {
-        const tone = (ix + iz) % 2 === 0 ? '#b3ab97' : '#a49c88';
-        groundQuad(lines[ix] + ROAD_WIDTH / 2, lines[iz] + ROAD_WIDTH / 2, lines[ix + 1] - ROAD_WIDTH / 2, lines[iz + 1] - ROAD_WIDTH / 2, tone);
+  function drawCar(list, car, flashing) {
+    const fx = Math.sin(car.heading);
+    const fz = Math.cos(car.heading);
+    const rx = fz;
+    const rz = -fx;
+    const L = 2.3;
+    const W = 1.05;
+    const cx = car.x;
+    const cz = car.z;
+    const body = car.kind === 'police' ? PALETTE.police : PALETTE.car[car.color % PALETTE.car.length];
+    const dark = car.kind === 'police' ? PALETTE.policeDark : shade(body, 0.55);
+    // Body: roof + the two long sides + the two ends.
+    const y0 = 0;
+    const y1 = 0.85;
+    const corners = [
+      [cx - rx * W - fx * L, y0, cz - rz * W - fz * L],
+      [cx + rx * W - fx * L, y0, cz + rz * W - fz * L],
+      [cx + rx * W + fx * L, y0, cz + rz * W + fz * L],
+      [cx - rx * W + fx * L, y0, cz - rz * W + fz * L],
+    ];
+    face(list, [
+      [corners[0][0], y1, corners[0][2]], [corners[1][0], y1, corners[1][2]],
+      [corners[2][0], y1, corners[2][2]], [corners[3][0], y1, corners[3][2]],
+    ], body, 1.0);
+    // Cabin, set back a little.
+    const cL = 1.1;
+    const cW = 0.85;
+    const ccx = cx - fx * 0.3;
+    const ccz = cz - fz * 0.3;
+    const cc = [
+      [ccx - rx * cW - fx * cL, 0.85, ccz - rz * cW - fz * cL],
+      [ccx + rx * cW - fx * cL, 0.85, ccz + rz * cW - fz * cL],
+      [ccx + rx * cW + fx * cL, 0.85, ccz + rz * cW + fz * cL],
+      [ccx - rx * cW + fx * cL, 0.85, ccz - rz * cW + fz * cL],
+    ];
+    face(list, [
+      [cc[0][0], 1.6, cc[0][2]], [cc[1][0], 1.6, cc[1][2]],
+      [cc[2][0], 1.6, cc[2][2]], [cc[3][0], 1.6, cc[3][2]],
+    ], shade(body, 0.85), 1.0);
+    // Wheels: four dark blocks.
+    for (const s1 of [-1, 1]) {
+      for (const s2 of [-1, 1]) {
+        const wx = cx + rx * W * s1 + fx * L * 0.72 * s2;
+        const wz = cz + rz * W * s1 + fz * L * 0.72 * s2;
+        face(list, [[wx - 0.5, 0, wz - 0.5], [wx + 0.5, 0, wz - 0.5], [wx + 0.5, 0.45, wz - 0.5], [wx - 0.5, 0.45, wz - 0.5]], '#15181c', 1);
       }
     }
-    for (const park of world.city.parks) {
-      groundQuad(park.x - park.w / 2, park.z - park.d / 2, park.x + park.w / 2, park.z + park.d / 2, PALETTE.grass);
+    if (car.kind === 'police') {
+      // The light bar, flashing red and blue.
+      const bar = flashing ? '#ff2d2d' : '#2d7bff';
+      const bx = cx - fx * 0.3;
+      const bz = cz - fz * 0.3;
+      face(list, [
+        [bx - rx * 0.7, 1.75, bz - rz * 0.7], [bx + rx * 0.7, 1.75, bz + rz * 0.7],
+        [bx + rx * 0.7, 1.95, bz + rz * 0.7], [bx - rx * 0.7, 1.95, bz - rz * 0.7],
+      ], bar, 1);
     }
-    // Roads: dark strips along every avenue, with centre dashes.
-    const rw = ROAD_WIDTH;
-    for (const line of lines) {
-      groundQuad(line - rw / 2, -185, line + rw / 2, 185, PALETTE.road);
-      groundQuad(-185, line - rw / 2, 185, line + rw / 2, PALETTE.road);
-    }
-    for (const line of lines) {
-      for (let s = -170; s < 170; s += 12) {
-        groundQuad(line - 0.35, s, line + 0.35, s + 6, PALETTE.roadLine);
-        groundQuad(s, line - 0.35, s + 6, line + 0.35, PALETTE.roadLine);
-      }
-    }
-    // The pier deck.
-    const pier = world.city.pier;
-    groundQuad(pier.x0, pier.z0, pier.x1, pier.z1, '#a9805a');
-  }
-
-  function drawCar(faces, car, time) {
-    const bodyY = 0.75;
-    addBox(faces, car.x, bodyY, car.z, car.width, 0.85, car.length, car.heading, shade(car.color, 1.15), car.color, false);
-    addBox(faces, car.x - Math.sin(car.heading) * 0.3, bodyY + 0.72, car.z - Math.cos(car.heading) * 0.3,
-      car.width * 0.82, 0.7, car.length * 0.5, car.heading, PALETTE.glass, shade(car.color, 0.85), false);
-    // Wheels.
-    const fwdX = Math.sin(car.heading);
-    const fwdZ = Math.cos(car.heading);
-    const rightX = Math.cos(car.heading);
-    const rightZ = -Math.sin(car.heading);
-    for (const [along, side] of [[1.5, 1], [1.5, -1], [-1.5, 1], [-1.5, -1]]) {
-      addBox(faces, car.x + fwdX * along + rightX * side * 0.95, 0.32, car.z + fwdZ * along + rightZ * side * 0.95,
-        0.35, 0.65, 0.8, car.heading, '#1a1a1a', '#1a1a1a', false);
-    }
-    if (car.kind === 'cop') {
-      const blink = Math.floor(time * 4) % 2 === 0;
-      addBox(faces, car.x - Math.sin(car.heading) * 0.3, bodyY + 1.35, car.z - Math.cos(car.heading) * 0.3,
-        0.9, 0.28, 0.5, car.heading, blink ? '#ff2d2d' : '#2d6bff', blink ? '#ff2d2d' : '#2d6bff', false);
-    }
-    if (car.brakeLight) {
-      addBox(faces, car.x - fwdX * (car.length / 2 - 0.1), bodyY + 0.2, car.z - fwdZ * (car.length / 2 - 0.1),
-        car.width * 0.9, 0.25, 0.15, car.heading, '#ff2222', '#ff2222', false);
+    if (car.kind === 'taxi') {
+      face(list, [
+        [cc[0][0], 1.65, cc[0][2]], [cc[1][0], 1.65, cc[1][2]],
+        [cc[2][0], 1.65, cc[2][2]], [cc[3][0], 1.65, cc[3][2]],
+      ], PALETTE.taxi, 1);
     }
   }
 
-  function drawPerson(faces, x, z, heading, shirt, pants, bob, down) {
-    if (down) {
-      addBox(faces, x, 0.35, z, 0.6, 0.7, 1.8, heading, shirt, shirt, false);
-      addBox(faces, x, 0.35, z + 1.0, 0.5, 0.5, 0.5, heading, '#e8b98a', '#e8b98a', false);
-      return;
-    }
-    const bounce = Math.abs(Math.sin(bob)) * 0.08;
-    addBox(faces, x, 0.55 + bounce, z, 0.55, 0.6, 0.4, heading, pants, pants, false);
-    addBox(faces, x, 1.25 + bounce, z, 0.75, 0.75, 0.45, heading, shade(shirt, 1.05), shirt, false);
-    addBox(faces, x, 1.85 + bounce, z, 0.5, 0.5, 0.45, heading, '#e8b98a', '#e8b98a', false);
+  function drawPerson(list, x, z, heading, color, scale, isPlayer) {
+    const fx = Math.sin(heading);
+    const fz = Math.cos(heading);
+    const rx = fz;
+    const rz = -fx;
+    const w = 0.42 * scale;
+    const h = 1.75 * scale;
+    const jacket = isPlayer ? PALETTE.player : PALETTE.ped[color % PALETTE.ped.length];
+    // Legs, torso, head.
+    box(list, x, z, w * 1.4, w * 1.4, h * 0.45, '#2c3e50', '#2c3e50', false);
+    box(list, x + fx * 0.1, z + fz * 0.1, w * 1.7, w * 1.7, h * 0.55, jacket, jacket, false);
+    const hx = x + fx * 0.15;
+    const hz = z + fz * 0.15;
+    face(list, [
+      [hx - rx * 0.3, h * 0.95, hz - rz * 0.3], [hx + rx * 0.3, h * 0.95, hz + rz * 0.3],
+      [hx + rx * 0.3, h * 1.25, hz + rz * 0.3], [hx - rx * 0.3, h * 1.25, hz - rz * 0.3],
+    ], '#e8b98a', 1);
   }
 
-  function drawMarker(faces, world, time) {
-    const target = world.missionTarget;
-    if (!target) return;
-    const bob = Math.sin(time * 2.4) * 0.6;
-    // Light pillar.
-    const p = [project(target.x - 1.2, 0, target.z), project(target.x + 1.2, 0, target.z), project(target.x + 1.2, 26, target.z), project(target.x - 1.2, 26, target.z)];
-    if (!p.some((q) => q === null)) {
-      ctx.globalAlpha = 0.28;
-      quad(p, '#ffd94d');
-      ctx.globalAlpha = 1;
-    }
-    // Floating diamond.
-    const d = project(target.x, 7 + bob, target.z);
-    if (d) {
-      const s = 26;
-      ctx.fillStyle = '#ffd94d';
-      ctx.beginPath();
-      ctx.moveTo(d.x, d.y - s);
-      ctx.lineTo(d.x + s * 0.7, d.y);
-      ctx.lineTo(d.x, d.y + s);
-      ctx.lineTo(d.x - s * 0.7, d.y);
-      ctx.closePath();
-      ctx.fill();
-      ctx.fillStyle = '#7a5b00';
-      ctx.font = `bold ${Math.round(H * 0.022)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('◆', d.x, d.y + 6);
-    }
-  }
-
-  function drawParticles(world) {
-    for (const pt of world.particles) {
-      const p = project(pt.x, pt.y, pt.z);
-      if (!p) continue;
-      ctx.globalAlpha = clamp(pt.life / pt.maxLife, 0, 1);
-      ctx.fillStyle = pt.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, Math.max(1, pt.size / Math.max(1, p.depth * 0.08)), 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  function drawPanel(title, lines, prompt) {
-    const w = Math.min(W * 0.62, 760);
-    const h = H * 0.12 + lines.length * H * 0.045 + H * 0.12;
-    const x = (W - w) / 2;
-    const y = (H - h) / 2;
-    ctx.fillStyle = 'rgba(12,16,26,0.88)';
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = '#f2c14e';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(x, y, w, h);
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#f2c14e';
-    ctx.font = `bold ${Math.round(H * 0.075)}px sans-serif`;
-    ctx.fillText(title, W / 2, y + H * 0.1);
-    ctx.fillStyle = '#f4ead8';
-    ctx.font = `${Math.round(H * 0.026)}px sans-serif`;
-    lines.forEach((line, i) => {
-      ctx.fillText(line, W / 2, y + H * 0.17 + i * H * 0.045);
-    });
-    ctx.fillStyle = '#ffd94d';
-    ctx.font = `bold ${Math.round(H * 0.028)}px sans-serif`;
-    ctx.fillText(prompt, W / 2, y + h - H * 0.045);
-  }
-
-  // Where the camera wants to be: behind the player (or their car), a little above.
-  function cameraTarget(world) {
-    const player = world.state.player;
-    const focus = player.inCar && player.car ? player.car : player;
-    const heading = focus.heading;
-    const targetYaw = heading + orbit;
-    const dist = player.inCar ? 11.5 : 8;
-    const height = player.inCar ? 4.6 : 3.6;
+  /** A world point in camera space (x right, y up, z forward). */
+  function toCam(x, y, z) {
+    const dx = x - cam.pos.x;
+    const dy = y - cam.pos.y;
+    const dz = z - cam.pos.z;
     return {
-      x: focus.x - Math.sin(targetYaw) * dist,
-      y: height,
-      z: focus.z - Math.cos(targetYaw) * dist,
-      yaw: targetYaw,
+      x: dx * cam.right.x + dy * cam.right.y + dz * cam.right.z,
+      y: dx * cam.up.x + dy * cam.up.y + dz * cam.up.z,
+      z: dx * cam.fwd.x + dy * cam.fwd.y + dz * cam.fwd.z,
     };
   }
 
-  /** Paint one frame of the world under the given screen. */
-  function draw(world, screen, best) {
-    const state = world.state;
-    const player = state.player;
-    // Camera: chases the target instead of snapping to it.
-    const target = cameraTarget(world);
-    cam.x = lerp(cam.x, target.x, 0.12);
-    cam.z = lerp(cam.z, target.z, 0.12);
-    cam.y = lerp(cam.y, target.y, 0.12);
-    cam.yaw = angleLerp(cam.yaw, target.yaw, 0.1);
-
-    drawSky(state.elapsed);
-    drawGround(world);
-
-    const faces = [];
-    const camD = (x, z) => Math.hypot(x - cam.x, z - cam.z);
-    for (const b of world.city.buildings) {
-      if (camD(b.x, b.z) > 150) continue;
-      const near = camD(b.x, b.z) < 48;
-      addBox(faces, b.x, b.h / 2, b.z, b.w, b.h, b.d, 0, b.roof, b.wall, near);
-    }
-    for (const palm of world.city.palms) {
-      if (camD(palm.x, palm.z) > 120) continue;
-      addBox(faces, palm.x, 2.0, palm.z, 0.3, 4.0, 0.3, 0, '#7a5a33', '#7a5a33', false);
-      addBox(faces, palm.x, 4.3, palm.z, 1.7, 0.5, 1.7, palm.z * 0.7, '#4fae62', '#3d8f4f', false);
-    }
-    for (const car of world.cars) {
-      if (!car.alive || camD(car.x, car.z) > 150) continue;
-      drawCar(faces, car, state.elapsed);
-    }
-    for (const cop of world.police.cops) {
-      if (camD(cop.x, cop.z) > 150) continue;
-      drawCar(faces, cop, state.elapsed);
-    }
-    for (const ped of world.peds) {
-      if (!ped.alive || camD(ped.x, ped.z) > 120) continue;
-      drawPerson(faces, ped.x, ped.z, ped.heading, ped.shirt, ped.pants, ped.walkPhase, ped.down);
-    }
-    for (const off of world.police.officers) {
-      if (!off.alive || camD(off.x, off.z) > 120) continue;
-      drawPerson(faces, off.x, off.z, off.heading, '#20242e', '#20242e', state.elapsed * 6, false);
-    }
-    if (!player.inCar) {
-      drawPerson(faces, player.x, player.z, player.heading, '#e85d3d', '#2e3a4a', player.walkPhase, false);
-    }
-    // Cash pickups glinting on the street.
-    for (const pk of state.pickups) {
-      if (!pk.taken && camD(pk.x, pk.z) < 100) {
-        addBox(faces, pk.x, 0.4 + Math.sin(state.elapsed * 3 + pk.x) * 0.15, pk.z, 0.8, 0.5, 0.5, state.elapsed, '#2fae62', '#2fae62', false);
+  /** Clip a camera-space polygon against the near plane (z >= 1). */
+  function clipNear(pts) {
+    const out = [];
+    for (let i = 0; i < pts.length; i += 1) {
+      const cur = pts[i];
+      const nxt = pts[(i + 1) % pts.length];
+      const curIn = cur.z >= 1;
+      const nxtIn = nxt.z >= 1;
+      if (curIn) out.push(cur);
+      if (curIn !== nxtIn) {
+        const t = (1 - cur.z) / (nxt.z - cur.z);
+        out.push({ x: cur.x + (nxt.x - cur.x) * t, y: cur.y + (nxt.y - cur.y) * t, z: 1 });
       }
     }
+    return out;
+  }
 
-    faces.sort((a, b) => b.depth - a.depth);
-    for (const face of faces) drawFaceWithWindows(face);
-    drawMarker(faces, world, state.elapsed);
-    drawParticles(world);
-
-    // Muzzle flash.
-    if (world.combat.muzzle > 0 && !player.inCar) {
-      const mx = player.x + Math.sin(player.heading) * 1.6;
-      const mz = player.z + Math.cos(player.heading) * 1.6;
-      const p = project(mx, 1.4, mz);
-      if (p) {
-        ctx.fillStyle = '#fff3c4';
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, 26, 0, Math.PI * 2);
-        ctx.fill();
+  /** Paint a polygon list in order (ground) or far-to-near (objects). */
+  function paintList(list, sorted) {
+    if (sorted) list.sort((a, b) => b.d - a.d);
+    for (const item of list) {
+      // Clip against the near plane first: a quad with a corner behind the
+      // camera still covers the screen in front of it, so it must be clipped,
+      // not dropped.
+      const clipped = clipNear(item.pts.map((p) => toCam(p[0], p[1], p[2])));
+      if (clipped.length < 3) continue;
+      ctx.fillStyle = item.color;
+      ctx.beginPath();
+      for (let i = 0; i < clipped.length; i += 1) {
+        const p = clipped[i];
+        const sx = view.w / 2 + (cam.focal * p.x) / p.z;
+        const sy = view.h / 2 - (cam.focal * p.y) / p.z;
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
       }
-    }
-    // Damage vignette.
-    if (state.damageFlash > 0) {
-      ctx.fillStyle = `rgba(200,20,20,${clamp(state.damageFlash * 0.5, 0, 0.45)})`;
-      ctx.fillRect(0, 0, W, H);
-    }
-    // Low-health pulse.
-    if (state.health < 30 && screen === SCREEN_PLAY) {
-      ctx.fillStyle = `rgba(200,20,20,${0.08 + 0.06 * Math.sin(state.elapsed * 6)})`;
-      ctx.fillRect(0, 0, W, H);
-    }
-
-    if (screen === SCREEN_TITLE) {
-      drawPanel('SOLMAR HEAT', [
-        'A sun-soaked open-world crime story in the city of Solmar.',
-        'Steal cars, outrun the Solmar PD, run jobs for Rico and Mara.',
-        'WASD move / drive   •   E enter car   •   Q punch   •   F shoot',
-        'M start story   •   P pause   •   Your progress saves automatically',
-        best > 0 ? `Best haul so far: $${best.toLocaleString('en-US')}` : 'New driver. The city is waiting.',
-      ], 'Press ENTER or click to start');
-    } else if (screen === SCREEN_PAUSED) {
-      drawPanel('PAUSED', ['Solmar waits for no one — except now.', 'Progress is saved.'], 'Press P to keep driving');
-    } else if (screen === SCREEN_OVER) {
-      drawPanel(state.overKind === 'busted' ? 'BUSTED' : 'WASTED', [
-        state.overKind === 'busted' ? 'The Solmar PD finally caught up with you.' : 'Solmar got the better of you this time.',
-        `You kept $${Math.round(state.cash).toLocaleString('en-US')} — the story continues.`,
-      ], 'Press ENTER to get back out there');
+      ctx.closePath();
+      ctx.fill();
     }
   }
 
-  return {
-    draw,
-    // Put the camera exactly on its target at once: screenshot scenes only get
-    // one or two frames before the shutter, so a smoothed camera never arrives.
-    snap(world) {
-      const target = cameraTarget(world);
-      cam.x = target.x;
-      cam.y = target.y;
-      cam.z = target.z;
-      cam.yaw = target.yaw;
-    },
-    setOrbit(value) {
-      orbit = value;
-    },
-    addOrbit(delta) {
-      orbit += delta;
-    },
-  };
+  function drawWorld(state) {
+    // The ground is flat: paint it first, in layer order (dirt, sea, walks,
+    // asphalt, plaza), so nearer ground never loses to a farther tile.
+    const ground = [];
+    drawGround(state, ground);
+    paintList(ground, false);
+    // Everything standing on it is sorted far-to-near.
+    const list = [];
+    drawBuildings(state, list);
+    const flashing = Math.floor(state.time * 2) % 2 === 0;
+    for (const car of state.cars) {
+      const dx = car.x - state.player.x;
+      const dz = car.z - state.player.z;
+      if (dx * dx + dz * dz > VIEW_DIST * VIEW_DIST) continue;
+      drawCar(list, car, flashing);
+    }
+    for (const ped of state.peds) {
+      const dx = ped.x - state.player.x;
+      const dz = ped.z - state.player.z;
+      if (dx * dx + dz * dz > VIEW_DIST * VIEW_DIST) continue;
+      drawPerson(list, ped.x, ped.z, ped.heading, ped.color, 1, false);
+    }
+    for (const cop of state.cops) {
+      if (cop.kind === 'foot') drawPerson(list, cop.x, cop.z, cop.heading, 0, 1.05, false);
+    }
+    // Jax, on foot or at the wheel.
+    const p = state.player;
+    if (p.onFoot) drawPerson(list, p.x, p.z, p.heading, 0, 1.1, true);
+    // Pickups.
+    for (const item of state.pickups) {
+      const col = item.kind === 'cash' ? '#2ecc71' : '#ffffff';
+      box(list, item.x, item.z, 1.2, 1.2, 0.7, col, col, false);
+    }
+    paintList(list, true);
+    // Screen-space effects last, so nothing paints over them.
+    // The mission target's golden beam.
+    if (state.mission && state.mission.target) {
+      const t = state.mission.target;
+      const base = project(t.x, 0, t.z);
+      const top = project(t.x, 60, t.z);
+      if (base && top) {
+        ctx.strokeStyle = 'rgba(255, 210, 63, 0.85)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(base.x, base.y);
+        ctx.lineTo(top.x, top.y);
+        ctx.stroke();
+      }
+    }
+    // Bullets as bright streaks.
+    for (const b of state.bullets) {
+      const bx = b.x - Math.sin(b.heading) * 1.2;
+      const bz = b.z - Math.cos(b.heading) * 1.2;
+      const a = project(b.x, 1, b.z);
+      const c = project(bx, 1, bz);
+      if (a && c) {
+        ctx.strokeStyle = '#ffe9a8';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(c.x, c.y);
+        ctx.stroke();
+      }
+    }
+    // Particles.
+    for (const pt of state.particles) {
+      const s = project(pt.x, pt.y, pt.z);
+      if (!s) continue;
+      const r = Math.max(1, (pt.size * cam.focal) / s.d);
+      ctx.globalAlpha = Math.max(0, pt.life / pt.max);
+      ctx.fillStyle = pt.color;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawMinimap(state) {
+    const size = Math.min(210, view.w * 0.16 + 90);
+    const x0 = view.w - size - 16;
+    const y0 = view.h - size - 16;
+    const H = CITY.half + 60;
+    const scale = size / (H * 2);
+    const px = (x) => x0 + (x + H) * scale;
+    const pz = (z) => y0 + (z + H) * scale;
+    ctx.fillStyle = PALETTE.hudPanel;
+    ctx.beginPath();
+    ctx.roundRect(x0 - 6, y0 - 6, size + 12, size + 12, 10);
+    ctx.fill();
+    // Sea.
+    ctx.fillStyle = PALETTE.sea;
+    ctx.fillRect(x0, pz(CITY.seaZ), size, y0 + size - pz(CITY.seaZ));
+    // Streets.
+    ctx.strokeStyle = '#5a636e';
+    ctx.lineWidth = 3;
+    for (const s of CITY.streets) {
+      ctx.beginPath();
+      ctx.moveTo(px(-H), pz(s));
+      ctx.lineTo(px(H), pz(s));
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px(s), pz(-H));
+      ctx.lineTo(px(s), pz(H));
+      ctx.stroke();
+    }
+    // Mission target.
+    if (state.mission && state.mission.target) {
+      const t = state.mission.target;
+      ctx.fillStyle = PALETTE.gold;
+      ctx.beginPath();
+      ctx.arc(px(t.x), pz(t.z), 5 + Math.sin(state.time * 4) * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Cops.
+    ctx.fillStyle = '#ff5252';
+    for (const cop of state.cops) {
+      ctx.beginPath();
+      ctx.arc(px(cop.x), pz(cop.z), 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Jax, as an arrow pointing where he faces (map north is up, heading 0 is south).
+    const p = state.player;
+    ctx.save();
+    ctx.translate(px(p.x), pz(p.z));
+    ctx.rotate(Math.PI - p.heading);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(0, -7);
+    ctx.lineTo(5, 5);
+    ctx.lineTo(-5, 5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    text('SOLMAR', x0, y0 - 10, 12, PALETTE.hudMuted, 'left');
+  }
+
+  function drawHud(state) {
+    const p = state.player;
+    // Cash and wanted, top left and top right.
+    ctx.fillStyle = PALETTE.hudPanel;
+    ctx.beginPath();
+    ctx.roundRect(14, 12, 196, 52, 10);
+    ctx.fill();
+    text(`$${p.cash}`, 28, 42, 26, PALETTE.gold, 'left', true);
+    text(`HEALTH ${Math.ceil(p.health)}`, 28, 60, 13, p.health < 35 ? PALETTE.danger : PALETTE.hudText, 'left');
+    // Health bar.
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.fillRect(120, 48, 76, 8);
+    ctx.fillStyle = p.health < 35 ? PALETTE.danger : PALETTE.ok;
+    ctx.fillRect(120, 48, 76 * Math.max(0, p.health / 100), 8);
+    // Wanted stars.
+    const stars = state.wanted;
+    text('★'.repeat(stars) + '☆'.repeat(5 - stars), view.w - 20, 44, 30, stars > 0 ? PALETTE.danger : PALETTE.hudMuted, 'right', true);
+    if (state.wanted > 0) text('WANTED', view.w - 20, 64, 12, PALETTE.danger, 'right');
+    // Mission panel.
+    if (state.mission && state.mission.index > 0) {
+      const m = state.mission;
+      const label = m.timer > 0 ? `${m.label} — ${Math.ceil(m.timer)}s` : m.label;
+      ctx.fillStyle = PALETTE.hudPanel;
+      ctx.beginPath();
+      ctx.roundRect(14, 74, Math.min(460, 24 + label.length * 7.5), 34, 10);
+      ctx.fill();
+      text(`◆ ${m.label}${m.timer > 0 ? ` — ${Math.ceil(m.timer)}s` : ''}`, 28, 97, 15, PALETTE.hudText, 'left');
+    }
+    // Speed, bottom left, while driving.
+    if (!p.onFoot && p.car) {
+      text(`${Math.round(Math.abs(p.car.speed) * 3.6)} km/h`, 24, view.h - 24, 22, PALETTE.hudText, 'left', true);
+    }
+    // The message feed, fading.
+    let y = view.h - 120;
+    for (let i = state.messages.length - 1; i >= 0 && i > state.messages.length - 4; i -= 1) {
+      const msg = state.messages[i];
+      const age = state.time - msg.t;
+      if (age > 6) continue;
+      ctx.globalAlpha = Math.max(0.25, 1 - age / 6);
+      text(msg.text, 24, y, 16, PALETTE.hudText, 'left');
+      ctx.globalAlpha = 1;
+      y -= 24;
+    }
+    // Waypoint arrow at the screen edge when the target is off-screen.
+    if (state.mission && state.mission.target) {
+      const t = state.mission.target;
+      const s = project(t.x, 2, t.z);
+      const onScreen = s && s.x > 40 && s.x < view.w - 40 && s.y > 40 && s.y < view.h - 40;
+      if (!onScreen) {
+        const dx = t.x - p.x;
+        const dz = t.z - p.z;
+        const ang = Math.atan2(dx, dz) - state.camera.yaw;
+        const ax = view.w / 2 + Math.sin(ang) * (view.h * 0.32);
+        const ay = view.h / 2 - Math.cos(ang) * (view.h * 0.32);
+        ctx.save();
+        ctx.translate(ax, ay);
+        ctx.rotate(Math.atan2(Math.sin(ang), Math.cos(ang)));
+        ctx.fillStyle = PALETTE.gold;
+        ctx.beginPath();
+        ctx.moveTo(0, -14);
+        ctx.lineTo(10, 8);
+        ctx.lineTo(-10, 8);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        const dist = Math.round(Math.hypot(dx, dz));
+        text(`${dist}m`, ax, ay + 30, 13, PALETTE.gold, 'center', true);
+      }
+    }
+    // Hurt flash.
+    if (state.time - (state.lastHurt || -10) < 0.4) {
+      ctx.fillStyle = 'rgba(255, 40, 40, 0.18)';
+      ctx.fillRect(0, 0, view.w, view.h);
+    }
+    drawMinimap(state);
+  }
+
+  function drawPanel(title, lines, prompt, accent) {
+    const width = Math.min(640, view.w - 60);
+    const height = 150 + lines.length * 32;
+    const x = (view.w - width) / 2;
+    const y = (view.h - height) / 2;
+    ctx.fillStyle = 'rgba(8, 12, 20, 0.78)';
+    ctx.beginPath();
+    ctx.roundRect(x, y, width, height, 14);
+    ctx.fill();
+    ctx.strokeStyle = accent || PALETTE.gold;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    text(title, view.w / 2, y + 62, 44, PALETTE.hudText, 'center', true);
+    for (let i = 0; i < lines.length; i += 1) {
+      text(lines[i], view.w / 2, y + 108 + i * 32, 18, PALETTE.hudMuted, 'center');
+    }
+    text(prompt, view.w / 2, y + height - 30, 20, PALETTE.gold, 'center');
+  }
+
+  /** Paint one frame: sky, world, HUD, then a panel for the screen the game is on. */
+  function draw(state, screen, best) {
+    ctx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+    computeCamera(state);
+    drawSky(state);
+    drawWorld(state);
+    if (screen === SCREEN_TITLE) {
+      drawPanel('SOLMAR HEAT', [
+        'A sun-soaked open-world crime game. You are Jax Rook.',
+        'Steal cars. Outrun the Solmar PD. Run four jobs for Rico and Mara.',
+        'WASD drive & walk · Shift run · E steal car · F shoot · P pause',
+        `Best haul: $${best}`,
+      ], 'Press Space or click to start');
+      return;
+    }
+    drawHud(state);
+    if (screen === SCREEN_PAUSED) {
+      drawPanel('Paused', ['Solmar waits for no one. Except now.'], 'Press P to keep playing');
+    } else if (screen === SCREEN_OVER) {
+      const busted = state.overReason === 'busted';
+      drawPanel(busted ? 'BUSTED' : 'WASTED', [
+        busted ? 'The Solmar PD finally caught up with Jax.' : 'Jax went down in the streets of Solmar.',
+        `Cash kept: $${state.player.cash} · Missions done: ${state.stats.missionsDone}`,
+        `Best haul: $${best}`,
+      ], 'Press Space to try again');
+    }
+  }
+
+  resize();
+  window.addEventListener('resize', resize);
+  return { draw, screenToGround };
 }

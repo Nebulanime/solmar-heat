@@ -1,123 +1,155 @@
-// SOLMAR HEAT — shared tuning and city constants.
-// Every number that shapes the city, the cars and the chase lives here so the
-// rest of the game reads like a recipe instead of a pile of magic numbers.
+// SOLMAR HEAT — every tuning number and colour in one place.
+//
+// The shared state every module works on (built by main.js):
+//   state = { seed, rng, time, city, player, cars, peds, cops, bullets,
+//             particles, pickups, wanted, heat, mission, cash, health,
+//             camera, screen, overReason, messages, stats }
+//   city = { pitch, streets[], blocks[], buildings[], landmarks, seaZ }
+//   player = { x, z, heading, speed, onFoot, car, health, cash, invuln }
+//   a car = { id, x, z, heading, speed, color, kind, driver, hp, parked }
+//   a ped = { x, z, heading, speed, color, mood }
+//   a cop = { kind: 'car'|'foot', x, z, heading, speed, car?, bust }
+//   mission = { index, step, label, target, timer, done }
+// The renderer projects world (x east, z south, y up) with a chase camera.
 
-export const GAME_TITLE = 'SOLMAR HEAT';
-export const CITY_NAME = 'Solmar';
-export const SAVE_KEY = 'solmar-heat-save-v1';
-export const BEST_KEY = 'solmar-heat-best-v1';
-
-// Fixed-step simulation: the world advances in 1/60 s slices.
 export const STEP = 1 / 60;
-export const MAX_FRAME = 0.25;
+export const SAVE_KEY = 'solmar-heat.save.v1';
+// Bump this when the save shape changes; old saves are then ignored.
+export const SAVE_VERSION = 1;
 
-// The city is a grid of avenues. Roads sit on these lines; blocks sit between them.
-export const ROAD_LINES = [-160, -120, -80, -40, 0, 40, 80, 120, 160];
-export const ROAD_WIDTH = 10;
-export const BLOCK = 40;
-export const CITY_EDGE = 185;
-
-// Sun-soaked palette: warm sky, pale sand, teal sea, pastel walls.
-export const PALETTE = {
-  skyTop: '#2f7fd0',
-  skyMid: '#7ec3ee',
-  skyLow: '#ffe3b3',
-  sun: '#fff3c4',
-  sea: '#1e7fa8',
-  seaDeep: '#14607f',
-  sand: '#ecd9a4',
-  grass: '#7fae62',
-  road: '#3d4148',
-  roadLine: '#e8d44d',
-  sidewalk: '#b9b3a4',
-  plaza: '#c9c2b2',
-  wall: ['#f2c14e', '#e8876b', '#7fb3d5', '#f4ead8', '#c98bb0', '#8fc7a3', '#e8a13c', '#a8b8d8'],
-  glass: '#9fd4e8',
-  roof: ['#8a4b3a', '#5d6b7a', '#7a6a55', '#4f5d6b'],
+// The city is a grid of blocks. Streets run at these coordinates; blocks sit between them.
+export const CITY = {
+  pitch: 160, // block (120) + street (40)
+  block: 120,
+  street: 40,
+  half: 400, // city spans -400..400; the sea starts at seaZ
+  seaZ: 420, // water south of here
+  streets: [-320, -160, 0, 160, 320],
 };
 
-// Named places the story and the missions point at. All original Solmar spots.
-export const PLACES = {
-  plaza: { x: 0, z: 0, label: 'Solmar Plaza' },
-  garage: { x: -140, z: -140, label: "Rico's Garage" },
-  pier: { x: 178, z: 0, label: 'Sunset Pier' },
-  marina: { x: 120, z: 140, label: 'Marina Solmar' },
-  hideout: { x: -120, z: 120, label: 'Hideout' },
-  market: { x: -40, z: 80, label: 'Mercado Verde' },
-  vault: { x: 140, z: -120, label: 'Marina Vault' },
-  lookout: { x: 60, z: -140, label: 'Cliff Lookout' },
-};
-
-// Player tuning.
 export const PLAYER = {
+  radius: 1.1,
   walkSpeed: 7,
-  runSpeed: 11.5,
+  runSpeed: 11,
   accel: 40,
-  radius: 0.9,
-  maxHealth: 100,
-  punchDamage: 25,
-  punchRange: 2.4,
-  punchCooldown: 0.45,
-  pistolDamage: 34,
-  pistolRange: 55,
-  pistolCooldown: 0.32,
-  startCash: 120,
+  health: 100,
+  enterRange: 5,
+  punch: 0, // on-foot attack is the gun, not fists
 };
 
-// Car tuning.
 export const CAR = {
   length: 4.6,
-  width: 2.0,
-  maxSpeed: 34,
-  copMaxSpeed: 36,
+  width: 2.1,
   accel: 16,
   brake: 30,
-  steer: 2.1,
-  reverseSpeed: 10,
+  reverseMax: 9,
+  maxSpeed: 34, // ~122 km/h, the sport car
+  steer: 1.9, // rad/s at full lock, scaled by speed
+  grip: 6, // how fast heading follows steering
+  hp: 100,
 };
 
-// Wanted level tuning.
+export const TRAFFIC = {
+  count: 14,
+  cruise: 11,
+  cruiseJitter: 3,
+  spawnGap: 26, // min distance from the player when spawning
+};
+
+export const PEDS = { count: 22, walk: 1.6, flee: 4.5 };
+
+export const POLICE = {
+  carSpeed: 26,
+  footSpeed: 8,
+  bustTime: 1.6, // seconds a foot cop must touch the player to bust them
+  ramDamage: 8,
+  maxCars: 5,
+};
+
+// Heat 0..100; stars = floor(heat / 20), capped at 5.
 export const WANTED = {
-  maxStars: 5,
-  stealCar: 1,
-  hitPed: 1,
-  punchCop: 2,
-  shoot: 1,
-  killCop: 2,
-  decayDelay: 9,
-  decayStep: 14,
+  perStar: 20,
+  stealCar: 16,
+  shotFired: 6,
+  hitPed: 26,
+  hitCop: 40,
+  decay: 2.2, // per second while unseen
+  decayHidden: 7, // per second while no cop is near
+  seenRange: 70,
 };
 
-// Mission rewards, in Solmar dollars.
-export const REWARDS = { m1: 400, m2: 650, m3: 900, m4: 2500 };
+export const COMBAT = {
+  bulletSpeed: 70,
+  bulletLife: 1.1,
+  damage: 34,
+  fireRate: 0.22, // seconds between shots
+  carBulletDamage: 25,
+};
 
-export function clamp(value, min, max) {
-  return value < min ? min : value > max ? max : value;
-}
+// Four chained story missions: Rico and Mara's arc, starring Jax Rook.
+export const MISSIONS = [
+  {
+    name: 'First Wheels',
+    giver: 'Rico',
+    intro: 'Rico needs wheels. Steal any car and bring it to the garage.',
+    reward: 300,
+  },
+  {
+    name: 'Solmar Run',
+    giver: 'Mara',
+    intro: 'Mara hid a package at the marina. Grab it, then run it to Plaza del Sol in 90 seconds. The cops will notice.',
+    reward: 600,
+  },
+  {
+    name: 'Heat Wave',
+    giver: 'Rico',
+    intro: 'Three stars and every cop in Solmar on your tail. Lose them. Get the heat to zero before the clock runs out.',
+    reward: 900,
+  },
+  {
+    name: 'The Big Score',
+    giver: 'Mara',
+    intro: 'The marina vault. Crack it, grab the take, and vanish to the safehouse with four stars on you. No second chances.',
+    reward: 2000,
+  },
+];
 
-export function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
+/** Total reward across the whole story arc. */
+export const TOTAL_REWARD = MISSIONS.reduce((sum, m) => sum + m.reward, 0);
 
-export function angleLerp(a, b, t) {
-  let d = (b - a) % (Math.PI * 2);
-  if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
-  return a + d * t;
-}
+export const PALETTE = {
+  skyTop: '#5aa9e6',
+  skyMid: '#a8d4f0',
+  horizon: '#ffe0ae',
+  sun: '#fff3c4',
+  sea: '#2f7fc8',
+  seaDeep: '#1d5a94',
+  sand: '#e8d5a8',
+  asphalt: '#3d4450',
+  asphaltLine: '#d8c94c',
+  sidewalk: '#b3a894',
+  blockTop: '#9a8f78',
+  grass: '#7da05c',
+  plaza: '#cbb98f',
+  building: ['#f2e3c6', '#e8b4a0', '#a8c8e0', '#d8a0b0', '#c8d8a0', '#f0d080', '#e0c8f0', '#b8d0c0'],
+  roof: ['#8a6f5c', '#6f7f8a', '#a08a6a', '#7a6a72'],
+  car: ['#c0392b', '#2980b9', '#f1c40f', '#7f8c8d', '#16a085', '#8e44ad', '#e67e22', '#ecf0f1'],
+  taxi: '#f7c948',
+  police: '#eef2f5',
+  policeDark: '#1c2733',
+  ped: ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#fd79a8'],
+  player: '#ffd23f',
+  playerDark: '#2c3e50',
+  hudPanel: 'rgba(12, 18, 28, 0.72)',
+  hudText: '#f2f4f6',
+  hudMuted: '#9aa5b1',
+  gold: '#ffd23f',
+  danger: '#ff5252',
+  ok: '#69f0ae',
+};
 
-export function dist2D(ax, az, bx, bz) {
-  const dx = ax - bx;
-  const dz = az - bz;
-  return Math.sqrt(dx * dx + dz * dz);
-}
+export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+export const FONT_DISPLAY = '"Trebuchet MS", system-ui, sans-serif';
 
-export function formatCash(n) {
-  return '$' + Math.round(n).toLocaleString('en-US');
-}
-
-export function formatClock(minutes) {
-  const h = Math.floor(minutes / 60) % 24;
-  const m = Math.floor(minutes % 60);
-  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-}
+/** Where the best run is kept between visits (this browser only). */
+export const BEST_KEY = 'solmar-heat.best';
