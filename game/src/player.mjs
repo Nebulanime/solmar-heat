@@ -1,127 +1,76 @@
-// SOLMAR HEAT — Jax Rook on foot: camera-relative WASD movement, sprinting,
-// building collision, and stealing cars with E. Driving itself lives in
-// vehicles.mjs; this module only decides when Jax is in or out of a car.
-import { CFG, clamp, angleLerp } from './config.mjs';
-import { clampToCity } from './city.mjs';
+// SOLMAR HEAT — player.mjs
+// Nova Vega on foot: movement, running, health, money, punching and
+// shooting. Driving is handled by vehicles.mjs; this module owns the
+// on-foot body and the crime consequences of what the player does.
+import { PLAYER, WORLD_W, WORLD_H } from './config.mjs';
+import { hitBuilding, clampWorld } from './city.mjs';
 
-export function createPlayer(x, z) {
+export function createPlayer(x, y) {
   return {
-    x, z,
-    heading: 0,
-    speed: 0,
-    health: CFG.playerHealth,
-    cash: 0,
-    onFoot: true,
-    car: null,
-    gunCooldown: 0,
-    color: '#e8b04a',
+    x, y, vx: 0, vy: 0, angle: 0,
+    health: PLAYER.maxHealth,
+    money: 50,
+    inCar: null, // vehicle object when driving, else null
+    punchTimer: 0,
+    shootTimer: 0,
+    moving: false,
+    dead: false,
   };
 }
 
-export function resolveCollision(city, x, z, r) {
-  for (const b of city.buildings) {
-    const hw = b.w / 2;
-    const hd = b.d / 2;
-    const nx = clamp(x, b.x - hw, b.x + hw);
-    const nz = clamp(z, b.z - hd, b.z + hd);
-    const dx = x - nx;
-    const dz = z - nz;
-    const d2 = dx * dx + dz * dz;
-    if (d2 < r * r) {
-      if (d2 < 0.0001) {
-        // Dead centre: push out along the smallest penetration axis.
-        const px = hw + r - Math.abs(x - b.x);
-        const pz = hd + r - Math.abs(z - b.z);
-        if (px < pz) x += (x >= b.x ? px : -px);
-        else z += (z >= b.z ? pz : -pz);
-      } else {
-        const d = Math.sqrt(d2);
-        x = nx + (dx / d) * r;
-        z = nz + (dz / d) * r;
-      }
-    }
+export function updatePlayer(p, input, city, dt, onCrime) {
+  if (p.dead || p.inCar) return;
+  const axis = input.axis();
+  const running = input.action('run');
+  const speed = running ? PLAYER.runSpeed : PLAYER.walkSpeed;
+  const len = Math.hypot(axis.x, axis.y) || 1;
+  p.moving = axis.x !== 0 || axis.y !== 0;
+  p.vx = (axis.x / len) * speed * (p.moving ? 1 : 0);
+  p.vy = (axis.y / len) * speed * (p.moving ? 1 : 0);
+  if (p.moving) p.angle = Math.atan2(p.vy, p.vx);
+
+  let nx = p.x + p.vx * dt;
+  let ny = p.y + p.vy * dt;
+  if (hitBuilding(city, nx, p.y, PLAYER.radius)) nx = p.x;
+  if (hitBuilding(city, p.x, ny, PLAYER.radius)) ny = p.y;
+  const clamped = clampWorld(nx, ny, PLAYER.radius);
+  p.x = clamped.x; p.y = clamped.y;
+
+  p.punchTimer = Math.max(0, p.punchTimer - dt);
+  p.shootTimer = Math.max(0, p.shootTimer - dt);
+  if (input.actionPressed('punch') && p.punchTimer <= 0) {
+    p.punchTimer = PLAYER.punchCooldown;
+    p.punching = true;
+    if (onCrime) onCrime('punch');
+  } else {
+    p.punching = false;
   }
-  return { x, z };
-}
-
-export function stepPlayer(S, input, dt) {
-  const p = S.player;
-  if (p.gunCooldown > 0) p.gunCooldown -= dt;
-  if (!p.onFoot) return;
-  const fwd = input.forward();
-  const strafe = input.strafe();
-  if (fwd === 0 && strafe === 0) {
-    p.speed = 0;
-    return;
+  if (input.actionPressed('shoot') && p.shootTimer <= 0) {
+    p.shootTimer = 0.5;
+    p.shotFired = true;
+    if (onCrime) onCrime('shoot');
+  } else {
+    p.shotFired = false;
   }
-  const yaw = S.camera.yaw;
-  // Camera-relative movement: W walks away from the camera, D strafes right.
-  const mx = Math.sin(yaw) * fwd + Math.cos(yaw) * strafe;
-  const mz = Math.cos(yaw) * fwd - Math.sin(yaw) * strafe;
-  const len = Math.hypot(mx, mz) || 1;
-  const speed = input.run() ? CFG.runSpeed : CFG.walkSpeed;
-  const targetHeading = Math.atan2(mx / len, mz / len);
-  p.heading = angleLerp(p.heading, targetHeading, Math.min(1, dt * 12));
-  p.speed = speed;
-  const nx = p.x + (mx / len) * speed * dt;
-  const nz = p.z + (mz / len) * speed * dt;
-  const clamped = clampToCity(nx, nz);
-  const fixed = resolveCollision(S.city, clamped.x, clamped.z, CFG.playerRadius);
-  p.x = fixed.x;
-  p.z = fixed.z;
+  if (p.health <= 0) { p.dead = true; p.health = 0; }
 }
 
-export function nearestCar(S, maxDist) {
-  let best = null;
-  let bestD = maxDist * maxDist;
-  for (const car of S.cars) {
-    if (car.kind === 'cop' || car.wrecked) continue;
-    const dx = car.x - S.player.x;
-    const dz = car.z - S.player.z;
-    const d = dx * dx + dz * dz;
-    if (d < bestD) { bestD = d; best = car; }
+export function hurtPlayer(p, amount) {
+  p.health = Math.max(0, p.health - amount);
+  if (p.health <= 0) p.dead = true;
+}
+
+export function healPlayer(p, amount) {
+  p.health = Math.min(PLAYER.maxHealth, p.health + amount);
+}
+
+// True when the player is far enough from every cop to start cooling down.
+export function isHiddenFromPolice(p, police) {
+  for (const u of police.units) {
+    const d = Math.hypot(u.car.x - p.x, u.car.y - p.y);
+    if (d < 420) return false;
   }
-  return best;
-}
-
-// True when Jax is close enough to a stealable car for the E prompt to show.
-export function canSteal(S) {
-  return S.player.onFoot && nearestCar(S, 30) !== null;
-}
-
-export function enterCar(S) {
-  const p = S.player;
-  if (!p.onFoot) return false;
-  const car = nearestCar(S, 30);
-  if (!car) return false;
-  p.onFoot = false;
-  p.car = car;
-  car.kind = 'player';
-  car.driver = true;
-  car.speed = 0;
-  S.stats.carsStolen += 1;
-  S.heat = Math.min(CFG.heatMax, S.heat + CFG.heatStealCar);
-  S.lastCrime = S.time;
-  S.message = 'Car stolen! Solmar PD is on to you.';
-  S.messageUntil = S.time + 3;
-  if (S.audio) S.audio.horn();
   return true;
 }
 
-export function exitCar(S) {
-  const p = S.player;
-  if (p.onFoot || !p.car) return false;
-  const car = p.car;
-  car.kind = 'traffic';
-  car.driver = false;
-  car.speed = 0;
-  p.x = car.x + Math.cos(car.heading + Math.PI / 2) * 10;
-  p.z = car.z + Math.sin(car.heading + Math.PI / 2) * 10;
-  const fixed = resolveCollision(S.city, p.x, p.z, CFG.playerRadius);
-  p.x = fixed.x;
-  p.z = fixed.z;
-  p.heading = car.heading;
-  p.onFoot = true;
-  p.car = null;
-  return true;
-}
+export function payPlayer(p, amount) { p.money += amount; }

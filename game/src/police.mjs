@@ -1,138 +1,117 @@
-// SOLMAR HEAT — Solmar PD: the wanted system. Heat 0..100 becomes 1..5 stars;
-// stars decide how many cruisers hunt Jax, how fast they are and how hard they
-// hit. Cruisers ram the player's car, or corner Jax on foot for a bust. Lie low
-// and the heat bleeds away.
-import { CFG, MONEY, wantedStars, clamp, angleLerp } from './config.mjs';
+// SOLMAR HEAT — police.mjs
+// The wanted system: stars rise when the player commits crimes, police
+// units spawn at the city edge, chase the player, ram their car and try
+// to bust them on foot. Stars decay when the player stays out of sight.
+import { WANTED, COLORS } from './config.mjs';
 import { makeCar } from './vehicles.mjs';
-import { randomRoadPoint } from './city.mjs';
 
-export function addHeat(S, amount) {
-  S.heat = clamp(S.heat + amount, 0, CFG.heatMax);
-  S.lastCrime = S.time;
+export function createPolice() {
+  return {
+    wanted: 0,
+    heat: 0, // fractional heat feeding the star display
+    sinceCrime: 99,
+    units: [], // police cars / officers
+    sirenTimer: 0,
+    busted: false,
+  };
 }
 
-export function copsWanted(S) {
-  const stars = wantedStars(S.heat);
-  if (stars === 0) return 0;
-  return Math.min(CFG.maxCops, stars);
+export function addWanted(police, stars) {
+  police.wanted = Math.min(WANTED.max, police.wanted + stars);
+  police.heat = police.wanted;
+  police.sinceCrime = 0;
+  syncUnits(police);
 }
 
-export function stepPolice(S, dt) {
-  // Heat decays only after a quiet spell with no fresh crime.
-  if (S.time - S.lastCrime > CFG.heatQuietDelay && S.heat > 0) {
-    S.heat = Math.max(0, S.heat - CFG.heatDecayPerSec * dt);
-  }
-  const want = copsWanted(S);
-  // Spawn cruisers near the player until the roster matches the stars.
-  while (S.cops.length < want) {
-    const p = randomRoadPoint(S.rng);
-    const near = {
-      x: S.player.x + (S.rng.chance(0.5) ? -1 : 1) * S.rng.range(140, 260),
-      z: S.player.z + (S.rng.chance(0.5) ? -1 : 1) * S.rng.range(140, 260),
-    };
-    const car = makeCar(near.x, near.z, 0, 'cop', '#1c2f4a');
-    car.speed = CFG.copSpeed * 0.6;
-    car.shotCooldown = 1;
-    S.cops.push(car);
-    S.cars.push(car);
-  }
-  // Stand down cruisers when the heat is gone.
-  if (want === 0 && S.cops.length > 0) {
-    for (const cop of S.cops) {
-      const i = S.cars.indexOf(cop);
-      if (i >= 0) S.cars.splice(i, 1);
-    }
-    S.cops.length = 0;
-    if (S.audio) S.audio.siren(false);
-    return;
-  }
-  if (S.cops.length > 0 && S.audio) S.audio.siren(true);
+export function setWanted(police, stars) {
+  police.wanted = Math.max(0, Math.min(WANTED.max, stars));
+  police.heat = police.wanted;
+  syncUnits(police);
+}
 
-  const p = S.player;
-  for (const cop of S.cops) {
-    const dx = p.x - cop.x;
-    const dz = p.z - cop.z;
-    const d = Math.hypot(dx, dz) || 1;
-    const wantHeading = Math.atan2(dx / d, dz / d);
-    cop.heading = angleLerp(cop.heading, wantHeading, Math.min(1, dt * 2.4));
-    const stars = wantedStars(S.heat);
-    const targetSpeed = CFG.copSpeed * (0.72 + stars * 0.07);
-    cop.speed += clamp(targetSpeed - cop.speed, -160 * dt, 130 * dt);
-    cop.x += Math.sin(cop.heading) * cop.speed * dt;
-    cop.z += Math.cos(cop.heading) * cop.speed * dt;
-    const b = CFG.halfWorld - 6;
-    cop.x = clamp(cop.x, -b, b);
-    cop.z = clamp(cop.z, -b, b);
+// Keep the number of active units in line with the wanted level.
+function syncUnits(police) {
+  const want = WANTED.copsPerStar[police.wanted];
+  while (police.units.length < want) {
+    police.units.push(spawnUnit(police.units.length));
+  }
+  while (police.units.length > want) police.units.pop();
+}
 
-    // Ram: a cruiser touching the player's car shoves it and scuffs Jax a little.
-    // Kept gentle on purpose: a chase should threaten the run, not end it in seconds.
-    if (!p.onFoot && p.car && d < 16) {
-      p.car.speed *= 0.94;
-      p.car.x += (dx / d) * 1.5;
-      p.car.z += (dz / d) * 1.5;
-      damagePlayer(S, 6 * dt);
-      if (S.audio) S.audio.crash();
-    }
-    // On foot, a close cruiser busts Jax.
-    if (p.onFoot && d < 13 && Math.abs(cop.speed) > 20) {
-      bustPlayer(S);
-      return;
-    }
-    // Cops shoot when close and Jax is on foot.
-    cop.shotCooldown -= dt;
-    if (p.onFoot && d < CFG.copShotRange && cop.shotCooldown <= 0) {
-      cop.shotCooldown = CFG.copShotCooldown;
-      damagePlayer(S, CFG.copShotDamage);
-      S.tracer = { x1: cop.x, z1: cop.z, x2: p.x, z2: p.z, life: 0.12 };
-      if (S.audio) S.audio.shot();
+function spawnUnit(i) {
+  const edge = [
+    { x: 120, y: 120 }, { x: 3080, y: 120 },
+    { x: 120, y: 2280 }, { x: 3080, y: 2280 },
+    { x: 1600, y: 100 }, { x: 1600, y: 2300 },
+  ][i % 6];
+  const car = makeCar(edge.x, edge.y, 0, COLORS.copCar, 'police');
+  car.speed = 0;
+  return { car, state: 'chase', bustTimer: 0 };
+}
+
+export function updatePolice(police, player, dt, onBusted) {
+  police.sinceCrime += dt;
+  police.sirenTimer -= dt;
+  if (police.wanted > 0 && police.sirenTimer <= 0) {
+    police.sirenTimer = 2.4;
+    police.siren = true;
+  } else {
+    police.siren = false;
+  }
+  // Decay: staying clean for a while drops a star.
+  if (police.wanted > 0 && police.sinceCrime > WANTED.decayDelay) {
+    police.heat -= WANTED.decayRate * dt;
+    if (police.heat <= police.wanted - 1) {
+      police.wanted -= 1;
+      police.heat = police.wanted;
+      syncUnits(police);
     }
   }
-  // Extra cruisers beyond the wanted count peel off.
-  while (S.cops.length > want) {
-    const cop = S.cops.pop();
-    const i = S.cars.indexOf(cop);
-    if (i >= 0) S.cars.splice(i, 1);
+  const px = player.inCar ? player.inCar.x : player.x;
+  const py = player.inCar ? player.inCar.y : player.y;
+  const speed = WANTED.copSpeed[police.wanted] || 0;
+  for (const u of police.units) {
+    const c = u.car;
+    const dx = px - c.x, dy = py - c.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const wantAngle = Math.atan2(dy, dx);
+    let da = wantAngle - c.angle;
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    c.angle += Math.max(-2.4 * dt, Math.min(2.4 * dt, da));
+    c.speed = d > 46 ? speed : 0;
+    c.x += Math.cos(c.angle) * c.speed * dt;
+    c.y += Math.sin(c.angle) * c.speed * dt;
+    // Bust: a cop standing next to the player on foot for 2 seconds.
+    if (!player.inCar && d < 40) {
+      u.bustTimer += dt;
+      if (u.bustTimer > 2 && !police.busted) {
+        police.busted = true;
+        if (onBusted) onBusted();
+      }
+    } else {
+      u.bustTimer = 0;
+    }
+    // Ramming the player's car slows it and hurts the player a little.
+    if (player.inCar && d < 40) {
+      player.inCar.speed *= 0.92;
+    }
   }
 }
 
-export function damagePlayer(S, amount) {
-  const p = S.player;
-  p.health -= amount;
-  if (p.health <= 0) {
-    p.health = 0;
-    S.screen = 'wasted';
-    S.deathAt = S.time;
-    if (S.audio) S.audio.busted();
-  }
+export function clearWanted(police) {
+  police.wanted = 0;
+  police.heat = 0;
+  police.units = [];
+  police.busted = false;
 }
 
-export function bustPlayer(S) {
-  const p = S.player;
-  const fine = Math.min(p.cash, MONEY.bustedFine);
-  p.cash -= fine;
-  S.heat = Math.floor(S.heat / 2);
-  S.screen = 'busted';
-  S.deathAt = S.time;
-  if (S.audio) S.audio.busted();
-  S.message = `Busted! Solmar PD fined you $${fine}.`;
-  S.messageUntil = S.time + 4;
-}
-
-export function respawnAfterEnd(S) {
-  const p = S.player;
-  const hospital = S.city.landmarks.hospital;
-  p.x = hospital.x;
-  p.z = hospital.z;
-  p.health = CFG.playerHealth;
-  p.onFoot = true;
-  p.car = null;
-  for (const cop of S.cops) {
-    const i = S.cars.indexOf(cop);
-    if (i >= 0) S.cars.splice(i, 1);
+// How close the nearest unit is to the player (Infinity when no units).
+export function nearestCopDistance(police, player) {
+  let best = Infinity;
+  for (const u of police.units) {
+    const d = Math.hypot(u.car.x - player.x, u.car.y - player.y);
+    if (d < best) best = d;
   }
-  S.cops.length = 0;
-  S.heat = Math.max(0, S.heat - 20);
-  S.bullets.length = 0;
-  if (S.audio) S.audio.siren(false);
-  S.screen = 'play';
+  return best;
 }
