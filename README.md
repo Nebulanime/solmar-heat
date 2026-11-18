@@ -1,6 +1,8 @@
 # SOLMAR HEAT
 
-![make.fun gta6-01](https://img.shields.io/badge/make.fun-gta6--01-ffd94a)
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/Nebulanime/solmar-heat/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/Nebulanime/solmar-heat/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 ![license MIT](https://img.shields.io/badge/license-MIT-green)
 
 An open-world crime game in the spirit of GTA 6, built for the make.fun
