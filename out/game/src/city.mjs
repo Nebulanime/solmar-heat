@@ -1,121 +1,88 @@
-// SOLMAR HEAT — the city of Solmar: a seeded grid of avenues, blocks, buildings,
-// a beach and a harbour, plus the named landmarks the missions drive to.
-// Everything is placed from the seed, so the same seed always builds the same city.
-import { CFG, BUILDING_COLORS } from './config.mjs';
-import { makeRng } from './rng.mjs';
+// SOLMAR HEAT — city.mjs
+// Procedural generation of Solmar: a road grid, city blocks full of
+// buildings, a park, a beach and the sea on the east edge, plus the
+// landmarks the missions point at. Everything is derived from the seed.
+import { WORLD_W, WORLD_H, ROAD_STEP, ROAD_W, BEACH_X, COLORS } from './config.mjs';
 
-const ROAD_LINES = [-400, -300, -200, -100, 0, 100, 200, 300, 400];
-
-export function isRoadPoint(x, z) {
-  const half = CFG.roadWidth / 2;
-  for (const line of ROAD_LINES) {
-    if (Math.abs(x - line) <= half) return true;
-    if (Math.abs(z - line) <= half) return true;
-  }
-  return false;
-}
-
-export function nearestRoadPoint(x, z) {
-  let bestX = ROAD_LINES[0];
-  let bestZ = ROAD_LINES[0];
-  for (const line of ROAD_LINES) {
-    if (Math.abs(line - x) < Math.abs(bestX - x)) bestX = line;
-    if (Math.abs(line - z) < Math.abs(bestZ - z)) bestZ = line;
-  }
-  if (Math.abs(bestX - x) <= Math.abs(bestZ - z)) return { x: bestX, z };
-  return { x, z: bestZ };
-}
-
-export function buildCity(seed) {
-  const rng = makeRng(seed);
-  const landmarks = {
-    garage: { x: -350, z: 350, label: "Rico's Garage" },
-    marina: { x: -50, z: 445, label: 'Solmar Marina' },
-    plaza: { x: 0, z: 0, label: 'Solmar Plaza' },
-    warehouse: { x: 380, z: 250, label: 'Dockside Warehouse' },
-    lighthouse: { x: 420, z: 445, label: 'Solmar Lighthouse' },
-    hospital: { x: -350, z: -350, label: 'Solmar General' },
-    policeHQ: { x: 350, z: -350, label: 'Solmar PD HQ' },
-    beach: { x: 150, z: 460, label: 'Solmar Beach' },
-  };
-  const reserved = Object.values(landmarks).map((p) => ({ x: p.x, z: p.z, r: 62 }));
-
+export function generateCity(rng) {
   const buildings = [];
-  for (let ix = 0; ix < ROAD_LINES.length - 1; ix += 1) {
-    for (let iz = 0; iz < ROAD_LINES.length - 1; iz += 1) {
-      const x0 = ROAD_LINES[ix] + CFG.roadWidth / 2 + 4;
-      const z0 = ROAD_LINES[iz] + CFG.roadWidth / 2 + 4;
-      const x1 = ROAD_LINES[ix + 1] - CFG.roadWidth / 2 - 4;
-      const z1 = ROAD_LINES[iz + 1] - CFG.roadWidth / 2 - 4;
-      const cx = (x0 + x1) / 2;
-      const cz = (z0 + z1) / 2;
-      if (cz > 420) continue; // beach strip stays open
-      if (reserved.some((r) => {
-        const dx = cx - r.x;
-        const dz = cz - r.z;
-        return dx * dx + dz * dz < r.r * r.r;
-      })) continue;
-      const downtown = Math.abs(cx) < 180 && Math.abs(cz) < 180;
-      const count = rng.int(1, downtown ? 2 : 3);
-      for (let b = 0; b < count; b += 1) {
-        const w = rng.range(22, 44);
-        const d = rng.range(22, 44);
-        const bx = rng.range(x0 + w / 2, x1 - w / 2);
-        const bz = rng.range(z0 + d / 2, z1 - d / 2);
-        const h = downtown
-          ? rng.range(34, 86)
-          : rng.range(12, 40);
+  const parks = [];
+  const landmarks = {
+    plaza: { x: 1050, y: 1050, name: 'Coral Plaza' },
+    boardwalk: { x: 2760, y: 620, name: 'Boardwalk' },
+    harbor: { x: 620, y: 1980, name: 'Old Harbor' },
+    tower: { x: 1500, y: 1500, name: 'Solmar Tower' },
+  };
+  // One park block in the north-west quarter.
+  parks.push({ x: 400, y: 400, w: 160, h: 160, name: 'Palm Park' });
+
+  for (let gx = 0; gx < WORLD_W / ROAD_STEP; gx++) {
+    for (let gy = 0; gy < WORLD_H / ROAD_STEP; gy++) {
+      const bx = gx * ROAD_STEP + ROAD_W / 2 + 12;
+      const by = gy * ROAD_STEP + ROAD_W / 2 + 12;
+      const bw = ROAD_STEP - ROAD_W - 24;
+      const bh = ROAD_STEP - ROAD_W - 24;
+      if (bx + bw > BEACH_X) continue; // beach blocks hold no buildings
+      if (gx === 2 && gy === 2) continue; // Palm Park block
+      if (gx === 5 && gy === 5) continue; // Coral Plaza block
+      if (gx === 7 && gy === 7) continue; // Solmar Tower block
+      const count = rng.int(1, 3);
+      for (let i = 0; i < count; i++) {
+        const w = rng.range(34, Math.max(40, bw - 8));
+        const h = rng.range(34, Math.max(40, bh - 8));
+        const x = bx + rng.range(0, Math.max(1, bw - w));
+        const y = by + rng.range(0, Math.max(1, bh - h));
+        const ci = rng.int(0, COLORS.building.length - 1);
         buildings.push({
-          x: bx, z: bz, w, d, h,
-          color: rng.pick(BUILDING_COLORS),
-          roof: rng.pick(['#e8e0d0', '#d8c8a8', '#c8d8c8', '#e0b8a8']),
+          x, y, w, h,
+          color: COLORS.building[ci],
+          roof: COLORS.roof[ci],
+          height: rng.int(1, 4),
         });
       }
     }
   }
+  // Solmar Tower: one tall landmark at the city centre.
+  buildings.push({
+    x: 1450, y: 1450, w: 100, h: 100,
+    color: '#4a7fc9', roof: '#2f4a7a', height: 8, landmark: true,
+  });
+  // Old Harbor warehouses along the south edge.
+  buildings.push({ x: 560, y: 1920, w: 120, h: 70, color: '#8a6a4a', roof: '#5a4630', height: 2 });
+  buildings.push({ x: 720, y: 2040, w: 90, h: 60, color: '#6a7a8a', roof: '#46525a', height: 2 });
+  return { buildings, parks, landmarks, roads: roadList() };
+}
 
-  const palms = [];
-  for (let i = 0; i < 40; i += 1) {
-    palms.push({ x: rng.range(-460, 460), z: rng.range(428, 492) });
+function roadList() {
+  const roads = [];
+  for (let x = 0; x <= WORLD_W; x += ROAD_STEP) roads.push({ x, vertical: true });
+  for (let y = 0; y <= WORLD_H; y += ROAD_STEP) roads.push({ y, vertical: false });
+  return roads;
+}
+
+// True when point (x, y) is on a road (drivable surface).
+export function onRoad(x, y) {
+  const mx = ((x % ROAD_STEP) + ROAD_STEP) % ROAD_STEP;
+  const my = ((y % ROAD_STEP) + ROAD_STEP) % ROAD_STEP;
+  return mx < ROAD_W || my < ROAD_W || mx > ROAD_STEP - 2 || my > ROAD_STEP - 2;
+}
+
+// True when point (x, y) is on the sand / in the sea.
+export function onBeach(x, y) { return x >= BEACH_X; }
+export function inSea(x, y) { return x >= WORLD_W - 120; }
+
+// Circle-vs-building collision: returns the building hit, or null.
+export function hitBuilding(city, x, y, r) {
+  for (const b of city.buildings) {
+    if (x + r > b.x && x - r < b.x + b.w && y + r > b.y && y - r < b.y + b.h) return b;
   }
-  // A row of palms lines the plaza so the cover shot reads "sun-soaked" at once.
-  for (let i = 0; i < 8; i += 1) {
-    palms.push({ x: -56 + i * 16, z: -58 });
-    palms.push({ x: -56 + i * 16, z: 58 });
-  }
+  return null;
+}
 
+// Clamp a point inside the playable world (sea edge blocks walking).
+export function clampWorld(x, y, r) {
   return {
-    seed,
-    roads: ROAD_LINES.slice(),
-    roadWidth: CFG.roadWidth,
-    buildings,
-    palms,
-    landmarks,
-    bounds: CFG.halfWorld,
-    beachZ: 425,
-    seaZ: 500,
-  };
-}
-
-export function randomRoadPoint(rng) {
-  const vertical = rng.chance(0.5);
-  const line = rng.pick(ROAD_LINES);
-  const along = rng.range(-400, 400);
-  return vertical ? { x: line, z: along } : { x: along, z: line };
-}
-
-export function randomSidewalkPoint(rng) {
-  const p = randomRoadPoint(rng);
-  const off = CFG.roadWidth / 2 + rng.range(3, 9);
-  if (rng.chance(0.5)) p.x += rng.sign() * off;
-  else p.z += rng.sign() * off;
-  return p;
-}
-
-export function clampToCity(x, z) {
-  const b = CFG.halfWorld - 8;
-  return {
-    x: Math.max(-b, Math.min(b, x)),
-    z: Math.max(-b, Math.min(b, z)),
+    x: Math.max(r, Math.min(WORLD_W - 130, x)),
+    y: Math.max(r, Math.min(WORLD_H - r, y)),
   };
 }

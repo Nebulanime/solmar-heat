@@ -1,82 +1,54 @@
-// SOLMAR HEAT — traffic AI: cars cruise the avenue grid, pick a new direction at
-// intersections, slow for the car ahead, and wrap back into the city when they
-// drift too far from the player. No pathfinding graph — the grid is the graph.
-import { CFG, clamp, angleLerp } from './config.mjs';
-import { isRoadPoint, randomRoadPoint } from './city.mjs';
-import { alignToRoad } from './vehicles.mjs';
+// SOLMAR HEAT — traffic.mjs
+// Ambient traffic: cars that follow the road grid, stop at nothing,
+// honk when blocked and keep the city feeling alive. They use the
+// same car shape as the player's vehicles.
+import { makeCar, updateDriving } from './vehicles.mjs';
+import { ROAD_STEP, WORLD_W, WORLD_H } from './config.mjs';
 
-function onIntersection(car) {
-  const rx = Math.round(car.x / 100) * 100;
-  const rz = Math.round(car.z / 100) * 100;
-  return Math.abs(car.x - rx) < 8 && Math.abs(car.z - rz) < 8;
+export function spawnTraffic(rng, count) {
+  const cars = [];
+  for (let i = 0; i < count; i++) {
+    const vertical = rng.chance(0.5);
+    const x = vertical ? rng.int(0, 15) * ROAD_STEP + 28 : rng.range(60, WORLD_W - 200);
+    const y = vertical ? rng.range(60, WORLD_H - 60) : rng.int(0, 11) * ROAD_STEP + 28;
+    const angle = vertical ? (rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2) : (rng.chance(0.5) ? 0 : Math.PI);
+    const car = makeCar(x, y, angle, rng.pick(['#e33b3b', '#3b7fe3', '#e3c93b', '#3be37f', '#e3e3e3', '#e37f3b']), 'traffic');
+    car.speed = rng.range(90, 170);
+    car.vertical = vertical;
+    cars.push(car);
+  }
+  return cars;
 }
 
-export function stepTraffic(S, dt) {
-  const rng = S.rng;
-  const px = S.player.x;
-  const pz = S.player.z;
-  for (const car of S.cars) {
-    if (car.kind !== 'traffic' || car.wrecked) continue;
-    // Recycle cars that wandered far from the action: respawn near the player.
-    const dx = car.x - px;
-    const dz = car.z - pz;
-    if (dx * dx + dz * dz > 700 * 700) {
-      const near = {
-        x: px + (rng.chance(0.5) ? -1 : 1) * rng.range(220, 380),
-        z: pz + (rng.chance(0.5) ? -1 : 1) * rng.range(220, 380),
-      };
-      const snapped = nearestRoadSnap(near);
-      car.x = snapped.x;
-      car.z = snapped.z;
-      car.speed = rng.range(30, CFG.trafficSpeed);
-      continue;
-    }
-    // At an intersection, sometimes turn left, right or straight on.
-    if (onIntersection(car) && rng.chance(dt * 0.9)) {
-      const turn = rng.pick([-Math.PI / 2, 0, Math.PI / 2]);
-      car.targetHeading = car.heading + turn;
-    }
-    car.heading = angleLerp(car.heading, car.targetHeading, Math.min(1, dt * 2.2));
-    // Slow for the car ahead.
-    let targetSpeed = CFG.trafficSpeed;
-    for (const other of S.cars) {
-      if (other === car || other.wrecked) continue;
-      const ox = other.x - car.x;
-      const oz = other.z - car.z;
-      const ahead = ox * Math.sin(car.heading) + oz * Math.cos(car.heading);
-      const side = Math.abs(ox * Math.cos(car.heading) - oz * Math.sin(car.heading));
-      if (ahead > 0 && ahead < 42 && side < 12) {
-        targetSpeed = Math.min(targetSpeed, Math.max(0, other.speed - 6));
-        break;
-      }
-    }
-    // And slow for pedestrians crossing ahead.
-    for (const ped of S.peds) {
-      const ox = ped.x - car.x;
-      const oz = ped.z - car.z;
-      const ahead = ox * Math.sin(car.heading) + oz * Math.cos(car.heading);
-      const side = Math.abs(ox * Math.cos(car.heading) - oz * Math.sin(car.heading));
-      if (ahead > 0 && ahead < 30 && side < 10) { targetSpeed = 0; break; }
-    }
-    car.speed += clamp(targetSpeed - car.speed, -90 * dt, 60 * dt);
-    car.x += Math.sin(car.heading) * car.speed * dt;
-    car.z += Math.cos(car.heading) * car.speed * dt;
-    // Stay inside the city and on the grid; if pushed off-road, steer back.
-    if (!isRoadPoint(car.x, car.z)) alignToRoad(car, dt * 2);
-    const b = CFG.halfWorld - 6;
-    car.x = clamp(car.x, -b, b);
-    car.z = clamp(car.z, -b, b);
+// Traffic cars cruise along their lane and wrap around the city edge.
+export function updateTraffic(cars, dt) {
+  for (const c of cars) {
+    if (c.wrecked) continue;
+    c.x += Math.cos(c.angle) * c.speed * dt;
+    c.y += Math.sin(c.angle) * c.speed * dt;
+    if (c.x < -60) c.x = WORLD_W + 40;
+    if (c.x > WORLD_W + 60) c.x = -40;
+    if (c.y < -60) c.y = WORLD_H + 40;
+    if (c.y > WORLD_H + 60) c.y = -40;
   }
 }
 
-function nearestRoadSnap(p) {
-  const lines = [-400, -300, -200, -100, 0, 100, 200, 300, 400];
-  let bx = lines[0];
-  let bz = lines[0];
-  for (const line of lines) {
-    if (Math.abs(line - p.x) < Math.abs(bx - p.x)) bx = line;
-    if (Math.abs(line - p.z) < Math.abs(bz - p.z)) bz = line;
+// A traffic car the player rams hard becomes a wreck that slows down.
+export function checkTrafficCrash(traffic, playerCar, onCrash) {
+  if (!playerCar) return;
+  for (const c of traffic) {
+    if (c.wrecked) continue;
+    const d = Math.hypot(c.x - playerCar.x, c.y - playerCar.y);
+    if (d < 38 && Math.abs(playerCar.speed) > 140) {
+      c.wrecked = true;
+      c.speed = 0;
+      playerCar.speed *= 0.45;
+      if (onCrash) onCrash(c);
+    }
   }
-  if (Math.abs(bx - p.x) <= Math.abs(bz - p.z)) return { x: bx, z: p.z };
-  return { x: p.x, z: bz };
+}
+
+// Count how many traffic cars are still driving (for the HUD/debug).
+export function drivingCount(traffic) {
+  return traffic.filter((c) => !c.wrecked).length;
 }
