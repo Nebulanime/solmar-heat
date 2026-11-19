@@ -3,15 +3,58 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOLMAR HEAT — a Nova Vega story</title>
-<link rel="stylesheet" href="styles.css">
+<title>SOLMAR HEAT — Nova Vega</title>
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<canvas id="game"></canvas>
-<div id="hud"></div>
-<script type="module" src="src/main.js"></script>
+<div id="wrap">
+  <canvas id="gl" width="1280" height="720"></canvas>
+  <canvas id="map" width="220" height="220"></canvas>
+  <div id="hud">
+    <div id="top-right">
+      <div id="wanted"></div>
+      <div id="cash">$0</div>
+      <div id="clock">18:42</div>
+    </div>
+    <div id="street">MARINA BOULEVARD</div>
+    <div id="mission-panel">
+      <div id="mission-title">MISSION 1 — FIRST WHEELS</div>
+      <div id="mission-obj">Get to the yellow marker</div>
+      <div id="mission-timer"></div>
+      <div id="police-list"></div>
+    </div>
+    <div id="dialog"><span id="dialog-name">NOVA</span><span id="dialog-text"></span></div>
+    <div id="radio">SOLMAR FM 98.4 — "Neon Coast" — The Palms</div>
+    <div id="weapon">PISTOL <span id="ammo">12 / 48</span></div>
+    <div id="speed"><span id="speed-num">0</span><span id="speed-unit">MPH</span></div>
+    <div id="health"><div id="health-bar"></div><span id="health-num">100</span></div>
+    <div id="banner"></div>
+    <div id="hint">WASD move &nbsp;·&nbsp; E enter car &nbsp;·&nbsp; SPACE brake &nbsp;·&nbsp; F shoot &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M map</div>
+    <div id="toast"></div>
+  </div>
+  <div id="title">
+    <div id="title-logo">SOLMAR<br><span>HEAT</span></div>
+    <div id="title-sub">A NOVA VEGA STORY &nbsp;·&nbsp; SOLMAR CITY</div>
+    <div id="title-menu">
+      <div class="menu-item sel" data-act="continue">CONTINUE — MISSION <span id="menu-mission">1</span></div>
+      <div class="menu-item" data-act="new">NEW GAME</div>
+      <div class="menu-item" data-act="freeroam">FREE ROAM</div>
+      <div class="menu-item" data-act="howto">HOW TO PLAY</div>
+    </div>
+    <div id="title-foot">SOLMAR HEAT · an original open-world crime game · v1.0 · keyboard + mouse</div>
+    <div id="howto" class="hidden">
+      WASD — move / drive &nbsp;·&nbsp; SHIFT — sprint &nbsp;·&nbsp; E — enter / exit car, use shop &nbsp;·&nbsp;
+      F — shoot &nbsp;·&nbsp; R — radio &nbsp;·&nbsp; C — camera &nbsp;·&nbsp; P — pause &nbsp;·&nbsp; M — big map<br>
+      Steal cars, finish the 5 missions, lose the cops, don't get caught.
+    </div>
+  </div>
+  <div id="pause" class="hidden">
+    <div id="pause-title">PAUSED</div>
+    <div class="menu-item" data-act="resume">RESUME</div>
+    <div class="menu-item" data-act="quit-title">QUIT TO TITLE</div>
+  </div>
+  <div id="bigmap" class="hidden"><canvas id="bigmap-canvas" width="900" height="560"></canvas><div id="bigmap-label">SOLMAR CITY — press M to close</div></div>
+</div>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>
-<!-- SOLMAR HEAT — index.html
-     Static entry: one canvas, one HUD root, one module script. No
-     external resources of any kind; the game runs fully offline. -->
