@@ -1,0 +1,51 @@
+/* SOLMAR HEAT — HUD and menu styling. All procedural: no images, no webfonts. */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0b12; font-family: 'Segoe UI', Arial, sans-serif; }
+#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 2px 4px rgba(0,0,0,.8); z-index: 5; }
+#hud-top-left { position: absolute; top: 16px; left: 16px; }
+#hud-mission { background: rgba(0,0,0,.55); border-left: 4px solid #facc15; padding: 10px 14px; border-radius: 4px; max-width: 340px; }
+#hud-mission-title { font-weight: 800; font-size: 17px; letter-spacing: .5px; }
+#hud-mission-obj { font-size: 13px; color: #eee; margin-top: 2px; }
+#hud-mission-meta { font-size: 13px; color: #facc15; font-weight: 700; margin-top: 3px; }
+#hud-top-right { position: absolute; top: 16px; right: 16px; text-align: right; }
+#hud-wanted { font-size: 26px; letter-spacing: 4px; color: #888; }
+#hud-money { font-size: 26px; font-weight: 800; color: #4ade80; }
+#hud-clock { font-size: 15px; color: #ddd; }
+.bar { width: 190px; height: 9px; background: rgba(0,0,0,.6); border: 1px solid #555; margin-top: 5px; margin-left: auto; border-radius: 3px; overflow: hidden; }
+.bar div { height: 100%; width: 100%; }
+.bar.armor div { background: #60a5fa; width: 0%; }
+
+#hud-minimap-wrap { position: absolute; left: 16px; bottom: 16px; width: 180px; height: 180px; border-radius: 50%; overflow: hidden; border: 3px solid rgba(255,255,255,.75); box-shadow: 0 0 0 3px rgba(0,0,0,.6), 0 4px 18px rgba(0,0,0,.6); }
+#minimap { display: block; }
+#hud-bottom-right { position: absolute; right: 20px; bottom: 16px; text-align: right; }
+#hud-speed { font-size: 52px; font-weight: 900; line-height: 1; }
+#hud-speed-unit { font-size: 14px; color: #ddd; }
+#hud-weapon { font-size: 15px; font-weight: 700; margin-top: 4px; background: rgba(0,0,0,.55); padding: 4px 10px; border-radius: 4px; display: inline-block; }
+#hud-radio { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 14px; background: rgba(0,0,0,.55); padding: 6px 14px; border-radius: 20px; color: #fde68a; }
+#hud-dialog { position: absolute; bottom: 110px; left: 50%; transform: translateX(-50%); max-width: 620px; background: rgba(0,0,0,.72); border: 1px solid #444; padding: 12px 18px; border-radius: 6px; font-size: 15px; line-height: 1.45; }
+#hud-banner { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); font-size: 30px; font-weight: 900; letter-spacing: 2px; color: #facc15; text-shadow: 0 3px 10px rgba(0,0,0,.9); white-space: nowrap; }
+#hud-crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 26px; color: #fff; }
+#hud-help { position: absolute; bottom: 64px; left: 50%; transform: translateX(-50%); font-size: 12px; color: rgba(255,255,255,.75); }
+
+.screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 10; background: linear-gradient(180deg, rgba(10,6,24,.25), rgba(10,6,24,.72)); color: #fff; text-align: center; }
+.title-inner { max-width: 760px; padding: 30px; }
+.title-kicker { letter-spacing: 8px; font-size: 15px; color: #fde68a; }
+.title-inner h1 { font-size: 96px; line-height: .95; margin: 8px 0; font-weight: 900; font-style: italic;
+  background: linear-gradient(180deg, #fff 15%, #fbbf24 45%, #f97316 70%, #db2777 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: 0 0 42px rgba(249,115,22,.35); }
+.title-sub { font-size: 19px; letter-spacing: 3px; color: #fde68a; font-weight: 700; }
+.title-story { font-size: 16px; line-height: 1.55; color: #eee; margin: 18px auto; max-width: 600px; }
+.title-keys { font-size: 13px; color: #ccc; }
+#title-continue { margin-top: 14px; color: #4ade80; font-weight: 700; }
+.title-press { margin-top: 26px; font-size: 19px; font-weight: 800; letter-spacing: 2px; animation: pulse 1.4s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+.passed-inner { max-width: 640px; padding: 30px; }
+.passed-inner h2 { font-size: 58px; margin: 0 0 10px; font-weight: 900; letter-spacing: 2px; }
+#passed-info, #busted-info, #complete-stats { font-size: 18px; color: #eee; margin-top: 8px; }
+#passed-next { font-size: 15px; color: #fde68a; margin-top: 14px; }
+.map-inner { text-align: center; }
+#map-canvas { border: 3px solid #facc15; border-radius: 8px; max-width: 92vw; max-height: 84vh; }
+.map-hint { margin-top: 10px; color: #ddd; font-size: 14px; }
