@@ -1,71 +1,74 @@
-# SOLMAR HEAT
+# SOLMAR HEAT — Patient Nova
 
-[![Bounty](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
-[![Rank](https://make.fun/badge/gta6-01/Nebulanime/solmar-heat/rank.svg)](https://make.fun/bounty/gta6-01)
-[![Reward](https://make.fun/badge/gta6-01/Nebulanime/solmar-heat/reward.svg)](https://make.fun/bounty/gta6-01)
+[![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01)
+[![rank](https://make.fun/badge/gta6-01/Nebulanime/solmar-heat/rank.svg)](https://make.fun/bounty/gta6-01)
+[![reward](https://make.fun/badge/gta6-01/Nebulanime/solmar-heat/reward.svg)](https://make.fun/bounty/gta6-01)
 
-**SOLMAR HEAT** is an original open-world crime game for the
-[make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01).
-You play Nova Vega, fresh out and broke in Solmar — a fictional
-sun-baked coastal city that is entirely our own invention: no
-Rockstar names, maps, characters, art or music anywhere in it.
+An open-world crime game in the spirit of GTA 6, built for the
+[make.fun gta6-01 bounty](https://make.fun/bounty/gta6-01). Everything is
+original: the city of Solmar, Nova Vega, the story, the art and the sounds.
+No Rockstar names, characters, maps or assets.
 
-## What is in the game
+## The game
 
-- **A city to explore** — a procedural road grid with blocks of
-  buildings, Palm Park, Coral Plaza, the Old Harbor, Solmar Tower,
-  and a beach and sea along the east edge.
-- **On foot and by car** — walk, run, punch and shoot, or press E
-  to steal any parked car and drive it. Traffic keeps the roads busy.
-- **Pedestrians** — sidewalk walkers who stroll, panic and scatter
-  when shots ring out or a car comes at them too fast.
-- **Wanted level + police** — crimes raise your stars; police cars
-  chase, ram and try to bust you. Stay clean and the heat cools off.
-- **Missions and a story** — five missions in a chain, from stealing
-  your first wheels to owning the whole coast, with payouts.
-- **Combat** — fists and gunfire, with bullet tracers and hit flashes.
-- **HUD + minimap** — health, cash, wanted stars, mission objective,
-  speed, a live clock and a minimap with the mission marker.
-- **Start screen, pause and save** — progress autosaves in the
-  browser; a saved game can be continued from the title screen.
-- **Sound** — a fully synthesized Web Audio soundtrack: engine hum,
-  sirens, gunshots, crashes and a bass groove. No audio files.
+Nova Vega is back in her home city. Five jobs stand between her and the
+marina yacht — and the whole Solmar PD stands in the way. Entry name:
+**Patient Nova**.
+
+- **A 3D city, hand-rendered in WebGL** — no 3D library, no textures, no
+  network. Lit-window towers, palms, neon signs, streetlights, the marina
+  and the ocean, under a sunset sky (and neon night).
+- **Drive and walk** — chase camera behind the car, third-person on foot.
+  Steal any traffic car (E) and the heat follows.
+- **Wanted system** — 0 to 5 stars. Cruisers chase and ram; at 3 stars a
+  police helicopter circles with a searchlight. Lay low, respray, or reach
+  the safehouse to cool off.
+- **Five story missions** — First Job, Hot Wheels, Heat Rising, Neon Run,
+  and Patient Nova — with a beacon, dialog from Rico, Marisol and Kestrel,
+  a timed delivery, and a MISSION PASSED screen. $6,900 in total pay.
+- **A full HUD** — round minimap with mission blip and police dots, wanted
+  stars, cash, clock, health/armor bars, speedometer, weapon/ammo, radio
+  station, mission panel and dialog box.
+- **Shops and saving** — Solmar Arms (ammo), Palm Burger (heal), Spray Shop
+  (lose the cops), and a safehouse that saves to localStorage.
+- **City map (M)**, title screen, pause, procedural radio music, engine hum,
+  sirens and gunshots — all synthesized with WebAudio, no audio files.
 
 ## Controls
 
 | Key | Action |
-| --- | ------ |
-| WASD / arrows | Move on foot, drive the car |
-| E | Steal a car / get out |
-| Space | Punch on foot, horn in a car |
-| F | Shoot toward the mouse |
-| Shift | Run |
-| M | Mission list |
-| P / Esc | Pause |
-| N | Mute |
+| --- | --- |
+| W A S D / arrows | Drive / walk |
+| Space | Brake |
+| Shift | Sprint on foot |
+| E | Enter/exit car, steal, use shops & safehouse |
+| Mouse click | Shoot (on foot) |
+| M | City map |
+| R | Change radio station |
+| P | Pause |
+| Enter | Start / continue |
 
-## How to play
-
-Serve the `game/` folder with any static server and open
-`game/index.html` in desktop Chrome — it plays fully offline, with
-no network requests and no build step:
+## Play it
 
 ```sh
 node serve.ts
-# then open http://localhost:8080
+# open http://localhost:8080
 ```
 
-## How to package the entry
+Screenshot scenes (real renders of the game playing itself):
+`?scene=chase` (sunset pursuit), `?scene=night` (on foot in the neon
+district), `?scene=title` (title screen), `?scene=map` (city map).
+
+## Build
 
 ```sh
-MAKEFUN_OUTPUT_DIR=out node main.ts
+node --test tests/logic.test.mjs
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-That copies `game/` and `screenshots/` into `out/` and writes
-`out/dossier.json` with the vendored make.fun library.
+`main.ts` (Node 22, standard library only) copies `game/` and
+`screenshots/` to `/output` and writes `/output/dossier.json`.
 
-## Credits
+## License
 
-Built from scratch for the make.fun gta6-01 bounty by Nebulanime.
-Everything in `game/` is original work: code, city, story, names,
-art and synthesized sound. Licensed under the MIT License.
+MIT — see [LICENSE](LICENSE).
