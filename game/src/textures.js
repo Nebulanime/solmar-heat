@@ -1,81 +1,279 @@
-// Solmar Heat — procedural textures, drawn on canvas at load time. No image
-// files, no network: every facade and neon sign is painted here from a
-// seeded generator, so buildings never read as flat coloured boxes.
-import { rng } from './logic.js';
+// SOLMAR HEAT — textures.js
+// Every texture in the game is painted procedurally on 2D canvases at
+// boot: no image files, no network. The main atlas is a 512x512 sheet of
+// sixteen 128x128 tiles (facades, road, sand, water, roofs, neon...).
+// Windows are kept SMALL and dense on purpose: the close-up shots of the
+// previous round showed facades with windows far too large.
 
-function makeCanvas(w, h) {
+export const TILE = 128;
+export const ATLAS_COLS = 4;
+
+export function tileUV(index) {
+  // No Y flip on upload, so v grows downward in canvas space: the tile's
+  // bottom edge (the bottom of a face) is v = (row+1)/4 and its top edge
+  // is v = row/4. Returning them in that order keeps the painted facade
+  // upright on the wall.
+  const col = index % ATLAS_COLS;
+  const row = Math.floor(index / ATLAS_COLS);
+  const u0 = col / ATLAS_COLS;
+  const v0 = (row + 1) / ATLAS_COLS;
+  const u1 = (col + 1) / ATLAS_COLS;
+  const v1 = row / ATLAS_COLS;
+  return [u0, v0, u1, v1];
+}
+
+function makeTileCanvas() {
   const c = document.createElement('canvas');
-  c.width = w; c.height = h;
+  c.width = 512;
+  c.height = 512;
   return c;
 }
-// A building facade, tileable vertically: base colour, floor bands, a grid
-// of windows (some lit warm, some dark, a few curtained) and grime streaks.
-// Shops and roof details are geometry, so this texture repeats cleanly
-// every ~12 m of building height.
-export function buildingTexture(seed, base, opts = {}) {
-  const R = rng(seed);
-  const W = 256, H = 512;
-  const c = makeCanvas(W, H), g = c.getContext('2d');
-  g.fillStyle = base; g.fillRect(0, 0, W, H);
-  for (let i = 0; i < 40; i++) {
-    g.fillStyle = `rgba(0,0,0,${0.03 + R() * 0.06})`;
-    g.fillRect(R() * W, R() * H * 0.7, 2 + R() * 8, 30 + R() * 120);
-  }
-  const floors = opts.floors ?? 8, cols = opts.cols ?? 6;
-  const top = 8, avail = H - top - 8;
-  const fh = avail / floors, cw = (W - 24) / cols;
-  for (let f = 0; f < floors; f++) {
-    g.fillStyle = 'rgba(0,0,0,0.18)';
-    g.fillRect(0, top + f * fh, W, 2);
-    for (let col = 0; col < cols; col++) {
-      const x = 12 + col * cw + 3, y = top + f * fh + 4, w = cw - 6, h = fh - 8;
-      const lit = R();
-      if (lit < 0.34) g.fillStyle = ['#ffd98a', '#ffb45e', '#ffe9b0', '#9fd8ff'][Math.floor(R() * 4)];
-      else if (lit < 0.5) g.fillStyle = '#3a4a63';
-      else g.fillStyle = '#10151f';
-      g.fillRect(x, y, w, h);
-      g.fillStyle = 'rgba(255,255,255,0.16)';
-      g.fillRect(x, y, w, 2);
-      if (R() < 0.3) { g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(x, y + h * 0.45, w, h * 0.55); }
-      g.strokeStyle = 'rgba(0,0,0,0.45)'; g.lineWidth = 2; g.strokeRect(x, y, w, h);
+
+function tileCtx(ctx, index) {
+  const col = index % ATLAS_COLS;
+  const row = Math.floor(index / ATLAS_COLS);
+  ctx.save();
+  ctx.translate(col * TILE, row * TILE);
+  ctx.beginPath();
+  ctx.rect(0, 0, TILE, TILE);
+  ctx.clip();
+  return () => ctx.restore();
+}
+
+// Paint a grid of small windows. litChance is the share of windows that
+// glow warm (evening), the rest are dark glass. Window size stays small
+// (9x12 px in a 128 tile) so close-ups read as a real facade.
+function paintWindows(ctx, rng, base, cols, rows, litChance) {
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, TILE, TILE);
+  const cw = TILE / cols;
+  const ch = TILE / rows;
+  for (let i = 0; i < cols; i++) {
+    for (let j = 0; j < rows; j++) {
+      const lit = rng() < litChance;
+      const x = i * cw + cw * 0.22;
+      const y = j * ch + ch * 0.2;
+      const w = cw * 0.56;
+      const h = ch * 0.6;
+      if (lit) {
+        ctx.fillStyle = rng() < 0.7 ? '#ffd98a' : '#ffeec2';
+      } else {
+        ctx.fillStyle = rng() < 0.5 ? '#1c2733' : '#263646';
+      }
+      ctx.fillRect(x, y, w, h);
+      ctx.fillStyle = 'rgba(255,255,255,0.08)';
+      ctx.fillRect(x, y, w, 2);
     }
   }
+}
+
+// A deterministic per-tile rng so the atlas is identical every boot.
+function tileRng(index) {
+  let a = (index * 2654435761 + 40503) >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function createAtlas() {
+  const canvas = makeTileCanvas();
+  const ctx = canvas.getContext('2d');
+  const rng = tileRng(0);
+
+  // Tile 0 — glass facade, dense small windows.
+  let done = tileCtx(ctx, 0);
+  paintWindows(ctx, tileRng(0), '#5d6b78', 8, 10, 0.28);
+  done();
+
+  // Tile 1 — brick facade with balconies and small windows.
+  done = tileCtx(ctx, 1);
+  ctx.fillStyle = '#8a5a44';
+  ctx.fillRect(0, 0, TILE, TILE);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  for (let y = 0; y < TILE; y += 8) ctx.fillRect(0, y, TILE, 1);
+  for (let y = 0; y < TILE; y += 16) ctx.fillRect(0, y, TILE, 2);
+  paintWindows(ctx, tileRng(1), 'rgba(0,0,0,0)', 6, 8, 0.22);
+  ctx.fillStyle = 'rgba(20,20,24,0.55)';
+  for (let j = 1; j < 8; j += 2) ctx.fillRect(4, j * 16 - 4, TILE - 8, 3);
+  done();
+
+  // Tile 2 — dark tower glass, vertical fins, small windows.
+  done = tileCtx(ctx, 2);
+  paintWindows(ctx, tileRng(2), '#2e3d4c', 10, 12, 0.34);
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  for (let x = 0; x < TILE; x += 13) ctx.fillRect(x, 0, 3, TILE);
+  done();
+
+  // Tile 3 — dark asphalt with a centre dash and edge lines.
+  done = tileCtx(ctx, 3);
+  ctx.fillStyle = '#232428';
+  ctx.fillRect(0, 0, TILE, TILE);
+  for (let i = 0; i < 260; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${0.02 + rng() * 0.04})`;
+    ctx.fillRect(rng() * TILE, rng() * TILE, 2, 2);
+  }
+  ctx.fillStyle = '#c8a84a';
+  ctx.fillRect(TILE / 2 - 2, 0, 4, 26);
+  ctx.fillRect(TILE / 2 - 2, 51, 4, 26);
+  ctx.fillRect(TILE / 2 - 2, 102, 4, 26);
+  ctx.fillStyle = '#d8d8d8';
+  ctx.fillRect(6, 0, 2, TILE);
+  ctx.fillRect(TILE - 8, 0, 2, TILE);
+  done();
+
+  // Tile 4 — sidewalk slabs.
+  done = tileCtx(ctx, 4);
+  ctx.fillStyle = '#9a938a';
+  ctx.fillRect(0, 0, TILE, TILE);
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  for (let i = 0; i <= 4; i++) {
+    ctx.fillRect(i * 32, 0, 2, TILE);
+    ctx.fillRect(0, i * 32, TILE, 2);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  for (let i = 0; i < 120; i++) ctx.fillRect(rng() * TILE, rng() * TILE, 2, 2);
+  done();
+
+  // Tile 5 — sand.
+  done = tileCtx(ctx, 5);
+  ctx.fillStyle = '#d9c08a';
+  ctx.fillRect(0, 0, TILE, TILE);
+  for (let i = 0; i < 500; i++) {
+    ctx.fillStyle = rng() < 0.5 ? 'rgba(120,90,40,0.18)' : 'rgba(255,240,200,0.25)';
+    ctx.fillRect(rng() * TILE, rng() * TILE, 2, 1);
+  }
+  done();
+
+  // Tile 6 — sea water with wave streaks.
+  done = tileCtx(ctx, 6);
+  ctx.fillStyle = '#14607e';
+  ctx.fillRect(0, 0, TILE, TILE);
+  ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+  ctx.lineWidth = 1.5;
+  for (let y = 8; y < TILE; y += 16) {
+    ctx.beginPath();
+    for (let x = 0; x <= TILE; x += 8) ctx.lineTo(x, y + Math.sin(x * 0.2 + y) * 2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(20,120,160,0.35)';
+  for (let i = 0; i < 40; i++) ctx.fillRect(rng() * TILE, rng() * TILE, 6, 2);
+  done();
+
+  // Tile 7 — rooftop: dark membrane, vents and AC boxes.
+  done = tileCtx(ctx, 7);
+  ctx.fillStyle = '#3a3a3e';
+  ctx.fillRect(0, 0, TILE, TILE);
+  ctx.fillStyle = '#4c4c52';
+  ctx.fillRect(12, 12, 30, 22);
+  ctx.fillRect(76, 60, 36, 26);
+  ctx.fillRect(20, 84, 22, 18);
+  ctx.fillStyle = '#2c2c30';
+  ctx.fillRect(12, 12, 30, 4);
+  ctx.fillRect(76, 60, 36, 4);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fillRect(0, 0, TILE, 3);
+  ctx.fillRect(0, 0, 3, TILE);
+  done();
+
+  return canvas;
+}
+
+// ---- Tiles 8-11 and the glow sprite (second pass) ----
+
+export function paintAtlasRest(canvas) {
+  const ctx = canvas.getContext('2d');
+  const rng = tileRng(8);
+
+  // Tile 8 — neon facade: dark wall, hot neon strips, lit windows.
+  let done = tileCtx(ctx, 8);
+  paintWindows(ctx, tileRng(8), '#232030', 6, 8, 0.5);
+  const neon = ['#ff2e88', '#22e6ff', '#ffd23e', '#7CFF6B'];
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = neon[i % neon.length];
+    ctx.fillRect(6 + i * 30, 10 + i * 6, 20, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillRect(6 + i * 30, 10 + i * 6, 20, 1);
+  }
+  ctx.fillStyle = '#ff2e88';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.fillText('NEON', 44, 108);
+  done();
+
+  // Tile 9 — grass.
+  done = tileCtx(ctx, 9);
+  ctx.fillStyle = '#4d7a3a';
+  ctx.fillRect(0, 0, TILE, TILE);
+  for (let i = 0; i < 400; i++) {
+    ctx.fillStyle = rng() < 0.5 ? 'rgba(20,60,20,0.25)' : 'rgba(140,190,90,0.25)';
+    ctx.fillRect(rng() * TILE, rng() * TILE, 2, 3);
+  }
+  done();
+
+  // Tile 10 — plaza checker tiles.
+  done = tileCtx(ctx, 10);
+  for (let i = 0; i < 4; i++) {
+    for (let j = 0; j < 4; j++) {
+      ctx.fillStyle = (i + j) % 2 === 0 ? '#b8a894' : '#8f7f6c';
+      ctx.fillRect(i * 32, j * 32, 32, 32);
+    }
+  }
+  done();
+
+  // Tile 11 — dock wood planks.
+  done = tileCtx(ctx, 11);
+  ctx.fillStyle = '#7a5a38';
+  ctx.fillRect(0, 0, TILE, TILE);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  for (let y = 0; y < TILE; y += 16) ctx.fillRect(0, y, TILE, 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  for (let y = 8; y < TILE; y += 16) ctx.fillRect(0, y, TILE, 1);
+  done();
+
+  // Tile 12 — plain white: vertex colour alone decides the look (car
+  // bodies, props, lamp heads). Tile 13 — plain dark grey.
+  done = tileCtx(ctx, 12);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, TILE, TILE);
+  done();
+  done = tileCtx(ctx, 13);
+  ctx.fillStyle = '#3c3c40';
+  ctx.fillRect(0, 0, TILE, TILE);
+  done();
+
+  return canvas;
+}
+
+// A soft radial glow sprite (sun, lamp halos, mission beacons, muzzle
+// flashes). White at the centre fading to transparent; tinted per draw.
+export function createGlowTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 2, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.6, 'rgba(255,255,255,0.16)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
   return c;
 }
-export const FACADE_SIGNS = [
-  ['#7a5c46', 'VELA HOTEL', '#ffd166'], ['#4a5a78', 'SOLMAR TOWER', '#7ee7ff'],
-  ['#6b4a5e', 'NEON ROW', '#ff5e8a'], ['#3f5a4a', 'PALM COURT', '#9dff6e'],
-  ['#5e4a3a', 'BAYVIEW', '#ffb45e'], ['#46506b', 'MARINA PLAZA', '#c9b8ff'],
-  ['#74443f', 'CALLE ROSA', '#ff8a5e'], ['#39505c', 'PORT SOLMAR', '#7ee7ff'],
-];
-export function makeBuildingTextures() {
-  return FACADE_SIGNS.map(([base], i) =>
-    buildingTexture(1000 + i * 77, base, { floors: 7 + (i % 5), cols: 5 + (i % 3) }));
-}
-// Neon sign texture: glowing text on transparent dark, for clubs and shops.
-export function neonTexture(text, color) {
-  const c = makeCanvas(256, 64), g = c.getContext('2d');
-  g.clearRect(0, 0, 256, 64);
-  g.font = 'bold 34px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.shadowColor = color; g.shadowBlur = 18;
-  g.fillStyle = color; g.fillText(text, 128, 32);
-  g.shadowBlur = 4; g.fillStyle = '#fff'; g.fillText(text, 128, 32);
-  return c;
-}
-// Wet asphalt: dark base with faint lane wear and puddle sheen patches.
-export function roadTexture(seed) {
-  const R = rng(seed);
-  const c = makeCanvas(256, 256), g = c.getContext('2d');
-  g.fillStyle = '#232327'; g.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 900; i++) {
-    g.fillStyle = `rgba(${120 + R() * 60 | 0},${120 + R() * 60 | 0},${130 + R() * 60 | 0},${0.05 + R() * 0.08})`;
-    g.fillRect(R() * 256, R() * 256, 1 + R() * 2, 1 + R() * 2);
-  }
-  for (let i = 0; i < 7; i++) {
-    const x = R() * 256, y = R() * 256, r = 12 + R() * 30;
-    const gr = g.createRadialGradient(x, y, 2, x, y, r);
-    gr.addColorStop(0, 'rgba(255,170,110,0.20)'); gr.addColorStop(1, 'rgba(255,170,110,0)');
-    g.fillStyle = gr; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
-  }
+
+// A soft round blob for fake contact shadows under cars and people.
+export function createBlobTexture() {
+  const c = document.createElement('canvas');
+  c.width = 64;
+  c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+  g.addColorStop(0, 'rgba(0,0,0,0.5)');
+  g.addColorStop(0.7, 'rgba(0,0,0,0.28)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 64, 64);
   return c;
 }
