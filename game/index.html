@@ -3,93 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solmar Heat — Patient Nova</title>
-<link rel="stylesheet" href="style.css">
+<title>SOLMAR HEAT — a Nova Vega story</title>
+<link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<div id="sky"></div>
-<div id="sun-glow"></div>
-<canvas id="gl"></canvas>
-
-<!-- GTA-style HUD -->
-<div id="hud">
-  <div id="top-right">
-    <div id="stars">☆☆☆☆☆</div>
-    <div id="money">$250</div>
-    <div id="clock">18:24</div>
-    <div id="wanted-label">SOLMAR PD — CLEAR</div>
-  </div>
-  <div id="minimap-wrap">
-    <canvas id="minimap" width="168" height="168"></canvas>
-    <div id="street">Calle Rosa &amp; Palm Court</div>
-  </div>
-  <div id="mission-panel">
-    <div id="mission-name">NO ACTIVE MISSION</div>
-    <div id="mission-obj">Press Enter on the title screen to start the next job.</div>
-    <div id="mission-dist"></div>
-    <div id="police-list">No units on you. Stay cool.</div>
-  </div>
-  <div id="bottom-right">
-    <div id="health-row"><span class="bar-label">HEALTH</span><div class="bar"><div id="health-fill"></div></div></div>
-    <div id="health-row"><span class="bar-label">ARMOR</span><div class="bar"><div id="armor-fill"></div></div></div>
-    <div id="weapon">Pistol 24</div>
-    <div id="radio">SOLMAR 98.5 — Sunset FM</div>
-    <div id="speed-wrap"><span id="speed">000</span><span id="speed-unit">km/h</span></div>
-  </div>
-  <div id="dialog" style="display:none"></div>
-  <div id="save-note">Saved at Bayview Motel • Day 1 • 0/5 missions</div>
-  <div id="controls">WASD drive / walk • E enter &amp; exit car • M map • P pause • C camera • R radio • N day/night • Enter start mission</div>
-</div>
-
-<!-- Title screen -->
-<div id="title" class="overlay">
-  <div class="title-inner">
-    <div class="title-kicker">A SOLMAR STORY</div>
-    <h1>SOLMAR<br>HEAT</h1>
-    <div class="title-sub">Patient Nova — Nova Vega is back in Solmar.<br>Five jobs. Five stars of heat. One way out.</div>
-    <div class="title-menu">
-      <div class="menu-item selected">▶ CONTINUE / NEW GAME</div>
-      <div class="menu-item">MISSIONS — 5 jobs</div>
-      <div class="menu-item">MAP OF SOLMAR</div>
-      <div class="menu-item">OPTIONS</div>
-    </div>
-    <div class="title-foot">Press ENTER to start &nbsp;•&nbsp; <span id="total-reward"></span></div>
-  </div>
-</div>
-
-<!-- Full map -->
-<div id="mapscreen" class="overlay" style="display:none">
-  <canvas id="bigmap" width="1100" height="640"></canvas>
-  <div class="map-foot">Press M or ESC to close</div>
-</div>
-
-<!-- Mission passed -->
-<div id="passed" class="overlay" style="display:none">
-  <div class="passed-inner">
-    <div id="passed-title">MISSION PASSED</div>
-    <div id="passed-sub"></div>
-    <div id="passed-reward"></div>
-  </div>
-</div>
-
-<!-- Busted / wasted -->
-<div id="bustedscreen" class="overlay" style="display:none">
-  <div class="busted-inner">
-    <div id="busted-title">BUSTED</div>
-    <div id="busted-sub"></div>
-    <div class="busted-foot">Press ENTER to continue</div>
-  </div>
-</div>
-
-<!-- Pause -->
-<div id="pause" class="overlay" style="display:none">
-  <div class="pause-inner">
-    <div class="pause-title">PAUSED</div>
-    <div class="pause-sub">Solmar waits for no one. Except now.</div>
-    <div class="pause-foot">P — resume &nbsp;•&nbsp; M — map &nbsp;•&nbsp; WASD — drive</div>
-  </div>
-</div>
-
+<canvas id="game"></canvas>
+<div id="hud"></div>
 <script type="module" src="src/main.js"></script>
 </body>
 </html>
+<!-- SOLMAR HEAT — index.html
+     Static entry: one canvas, one HUD root, one module script. No
+     external resources of any kind; the game runs fully offline. -->

@@ -1,0 +1,219 @@
+/* SOLMAR HEAT — styles.css
+   HUD styling: dark glass panels, warm sunset accents, big readable
+   type. The canvas fills the window; #hud sits on top of it. */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #0a0d18;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  color: #fff;
+  user-select: none;
+}
+
+#game {
+  position: fixed; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+}
+
+#hud { position: fixed; inset: 0; pointer-events: none; }
+
+/* ---- Top-left: cash / health / ammo ---- */
+.hud-tl { position: absolute; top: 16px; left: 18px; }
+.hud-cash {
+  font-size: 30px; font-weight: 800; letter-spacing: 1px;
+  color: #7dffb0;
+  text-shadow: 0 2px 0 rgba(0,0,0,0.55), 0 0 18px rgba(0,0,0,0.5);
+}
+.hud-health { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
+.hud-health::before { content: "HP"; font-size: 11px; font-weight: 700; opacity: 0.85; }
+.hud-bar {
+  width: 150px; height: 10px;
+  background: rgba(0,0,0,0.55);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 5px; overflow: hidden;
+}
+.hud-bar-fill { height: 100%; background: #37d67a; transition: width 0.2s; }
+.hud-ammo {
+  margin-top: 6px; font-size: 13px; font-weight: 700; letter-spacing: 1px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+}
+
+/* ---- Top-right: wanted stars ---- */
+.hud-tr { position: absolute; top: 14px; right: 20px; text-align: right; }
+.hud-stars {
+  font-size: 30px; letter-spacing: 4px;
+  text-shadow: 0 2px 0 rgba(0,0,0,0.6), 0 0 14px rgba(0,0,0,0.6);
+}
+
+/* ---- Mission panel ---- */
+.hud-mission {
+  position: absolute; top: 108px; left: 18px;
+  max-width: 340px;
+  background: rgba(8, 10, 20, 0.62);
+  border-left: 4px solid #ffd23e;
+  padding: 10px 14px;
+  border-radius: 4px;
+}
+.hud-mission-title { font-size: 15px; font-weight: 800; letter-spacing: 0.5px; color: #ffd23e; }
+.hud-mission-step { font-size: 13px; margin-top: 4px; line-height: 1.35; }
+.hud-mission-dist { font-size: 12px; margin-top: 5px; color: #9fd8ff; font-weight: 700; }
+
+/* ---- Dispatch feed ---- */
+.hud-dispatch {
+  position: absolute; top: 64px; right: 20px;
+  max-width: 320px; text-align: right;
+}
+.hud-dispatch-line {
+  font-size: 12px; line-height: 1.4; margin-top: 4px;
+  color: #cfe4ff;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+
+/* ---- Bottom-left: minimap, radio, street ---- */
+.hud-bl { position: absolute; left: 18px; bottom: 16px; }
+.hud-minimap {
+  display: block;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,0.85);
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.45), 0 4px 18px rgba(0,0,0,0.6);
+  background: #141a26;
+}
+.hud-radio {
+  margin-top: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.5px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+.hud-street {
+  font-size: 12px; opacity: 0.9; margin-top: 2px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+
+/* ---- Bottom-right: speedometer ---- */
+.hud-br { position: absolute; right: 22px; bottom: 14px; text-align: right; }
+.hud-speed {
+  font-size: 64px; font-weight: 800; line-height: 0.95;
+  text-shadow: 0 3px 0 rgba(0,0,0,0.55), 0 0 22px rgba(0,0,0,0.5);
+}
+.hud-speed-unit { font-size: 13px; font-weight: 700; letter-spacing: 3px; opacity: 0.85; }
+
+/* ---- Dialogue ---- */
+.hud-dialog {
+  position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+  width: min(620px, 72vw);
+  background: rgba(8, 10, 20, 0.78);
+  border: 1px solid rgba(255,255,255,0.22);
+  border-top: 3px solid #ff5fa2;
+  border-radius: 6px;
+  padding: 12px 18px;
+}
+.hud-dialog-speaker { font-size: 13px; font-weight: 800; letter-spacing: 2px; color: #ff8fc0; }
+.hud-dialog-text { font-size: 15px; line-height: 1.45; margin-top: 4px; }
+
+/* ---- Mission passed banner ---- */
+.hud-banner {
+  position: absolute; left: 50%; top: 30%; transform: translate(-50%, -50%);
+  text-align: center; display: none;
+}
+.hud-banner-title {
+  font-size: 52px; font-weight: 900; letter-spacing: 6px;
+  color: #ffd23e;
+  text-shadow: 0 4px 0 rgba(0,0,0,0.6), 0 0 30px rgba(255,180,0,0.5);
+}
+.hud-banner-sub { font-size: 18px; font-weight: 700; margin-top: 6px; text-shadow: 0 2px 4px rgba(0,0,0,0.9); }
+
+/* ---- Contextual prompt ---- */
+.hud-prompt {
+  position: absolute; left: 50%; bottom: 150px; transform: translateX(-50%);
+  background: rgba(8, 10, 20, 0.75);
+  border: 1px solid rgba(255,255,255,0.35);
+  padding: 7px 16px; border-radius: 20px;
+  font-size: 14px; font-weight: 700;
+  display: none;
+}
+
+/* ---- Title screen ---- */
+.hud-title {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: linear-gradient(to bottom, rgba(5,8,18,0.25) 0%, rgba(5,8,18,0.05) 40%, rgba(5,8,18,0.55) 100%);
+  text-align: center;
+}
+.hud-title-kicker { font-size: 13px; font-weight: 700; letter-spacing: 6px; color: #ffd23e; text-shadow: 0 2px 4px rgba(0,0,0,0.9); }
+.hud-title-logo {
+  font-size: 110px; font-weight: 900; line-height: 0.9; letter-spacing: 4px;
+  background: linear-gradient(180deg, #fff3c0 0%, #ffb02e 45%, #ff5f2e 75%, #ff2e88 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 5px 0 rgba(0,0,0,0.55)) drop-shadow(0 0 34px rgba(255,120,40,0.45));
+  margin: 10px 0 4px;
+}
+.hud-title-sub { font-size: 19px; font-style: italic; color: #ffe9f3; text-shadow: 0 2px 6px rgba(0,0,0,0.9); }
+.hud-title-menu { margin-top: 34px; }
+.hud-menu-item {
+  font-size: 20px; font-weight: 800; letter-spacing: 3px;
+  padding: 7px 34px; margin: 3px 0; cursor: pointer;
+  color: rgba(255,255,255,0.85);
+  text-shadow: 0 2px 4px rgba(0,0,0,0.9);
+}
+.hud-menu-item.selected {
+  color: #ffd23e;
+  background: rgba(0,0,0,0.45);
+  border-left: 4px solid #ffd23e;
+  border-right: 4px solid #ffd23e;
+}
+.hud-menu-item.disabled { opacity: 0.45; }
+.hud-title-foot {
+  position: absolute; bottom: 18px; left: 0; right: 0;
+  font-size: 12px; letter-spacing: 0.5px; color: rgba(255,255,255,0.85);
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+
+/* ---- Full-screen overlays (pause / busted / missions / options) ---- */
+.hud-overlay {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(5, 8, 18, 0.72);
+  text-align: center;
+}
+.hud-overlay-title {
+  font-size: 56px; font-weight: 900; letter-spacing: 8px; color: #ffd23e;
+  text-shadow: 0 4px 0 rgba(0,0,0,0.6);
+}
+.hud-overlay-sub { font-size: 16px; margin-top: 12px; line-height: 1.6; color: #e8ecf5; }
+.hud-busted { background: rgba(40, 4, 10, 0.78); }
+.hud-busted .hud-overlay-title { color: #ff4444; }
+.hud-missions-list { margin-top: 20px; text-align: left; min-width: 520px; }
+.hud-missions-row {
+  display: flex; justify-content: space-between; gap: 30px;
+  font-size: 15px; padding: 8px 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.15);
+}
+
+/* ---- Fullscreen map ---- */
+.hud-map {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: rgba(5, 8, 18, 0.82);
+}
+#map-canvas {
+  border: 3px solid rgba(255,255,255,0.6);
+  border-radius: 8px;
+  box-shadow: 0 10px 50px rgba(0,0,0,0.7);
+  max-width: 96vw; max-height: 82vh;
+}
+.hud-map-foot { margin-top: 12px; font-size: 13px; letter-spacing: 1px; color: #cfe4ff; }
+
+/* Hide the in-game HUD chrome while the title screen is up. */
+#hud.hud-title .hud-tl,
+#hud.hud-title .hud-tr,
+#hud.hud-title .hud-mission,
+#hud.hud-title .hud-dispatch,
+#hud.hud-title .hud-bl,
+#hud.hud-title .hud-br,
+#hud.hud-title .hud-dialog,
+#hud.hud-title .hud-prompt { display: none !important; }
